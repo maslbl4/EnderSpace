@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=EnderSpace
+Comment=Менеджер внутренней памяти Creality Ender-3 V3 KE
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/ender-space.exe %u
+Terminal=false
+Type=Application
+Icon=ender-space.exe
+Categories=Utility;
+StartupWMClass=ender-space.exe
+
+ 

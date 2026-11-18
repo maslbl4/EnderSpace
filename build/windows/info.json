@@ -1,0 +1,15 @@
+{
+	"fixed": {
+		"file_version": "0.1.0"
+	},
+	"info": {
+		"0409": {
+			"ProductVersion": "0.1.0",
+			"CompanyName": "My Company",
+			"FileDescription": "Менеджер внутренней памяти Creality Ender-3 V3 KE",
+			"LegalCopyright": "© 2026, My Company",
+			"ProductName": "EnderSpace",
+			"Comments": "This is a comment"
+		}
+	}
+}
