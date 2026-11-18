@@ -41,13 +41,13 @@ func main() {
 	}
 
 	fmt.Println("=== 1. GET /info ===")
-	get("http://" + ip + "/info", "", -1)
+	get("http://"+ip+"/info", "", -1)
 
 	fmt.Println("\n=== 2. GET /server/files/list?root=gcodes (Moonraker-кандидат) ===")
-	get("http://" + ip + "/server/files/list?root=gcodes", "", 300)
+	get("http://"+ip+"/server/files/list?root=gcodes", "", 300)
 
 	fmt.Println("\n=== 3. GET /printer (Moonraker-кандидат) ===")
-	get("http://" + ip + "/printer", "", 300)
+	get("http://"+ip+"/printer", "", 300)
 
 	fmt.Println("\n=== 4. WS :9999 reqGcodeFile ===")
 	file, err := wsFileList(ip, file)

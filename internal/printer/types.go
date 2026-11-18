@@ -20,6 +20,32 @@ type RawFile struct {
 	Thumb      string  // путь к превью на принтере
 }
 
+// FileMeta — файл из памяти принтера, обогащённый данными G-кода.
+// Nil-поля → «—» в UI (время/граммы не найдены).
+type FileMeta struct {
+	Path      string   // полный путь на принтере (для удаления/ключа кэша)
+	Name      string   // basename
+	Size      int64    // байты
+	PrintTime *int     // секунды
+	Filament  *float64 // граммы
+}
+
+// Storage — ёмкость внутренней памяти (eMMC). Total может быть оценкой
+// (константа из конфига), т.к. у принтера нет df-эндпоинта.
+type Storage struct {
+	Total int64
+	Used  int64
+	Free  int64
+}
+
+// PrinterStatus — текущее состояние подключения.
+type PrinterStatus struct {
+	IP        string
+	Connected bool
+	Printing  bool   // принтер сейчас печатает (если API сообщает)
+	Model     string // код модели, например "F005"
+}
+
 // State — накопленное состояние принтера: первое WS-сообщение — полный
 // снимок, далее принтер шлёт дельты; Merge складывает их в одну картину
 // (незаполненные поля дельты НЕ затирают прежние значения).
