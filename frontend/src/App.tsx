@@ -47,25 +47,32 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
   const [toast, setToast] = useState<string | null>(null);
   // Фаза 2: null — обогащение не идёт, иначе {Done, Total} из событий.
   const [enrichProgress, setEnrichProgress] = useState<EnrichProgress | null>(null);
+  // Таблица показывается только после files:done — к этому моменту у всех
+  // файлов собраны время/граммы/превью. До неё — прогресс-полоска.
+  const [tableReady, setTableReady] = useState(false);
 
-  const loading = files === null && !loadError;
+  const loading = !tableReady && !loadError;
 
   // Фаза 1: память и список файлов параллельно; ошибка — баннер с
-  // «Повторить». Старую таблицу при ⟳ не гасим (RPC фазы 1 мгновенный).
+  // «Повторить». До files:done таблица скрыта, прогресс-полоска — сразу.
   // После перезагрузки выбор обрезаем до существующих файлов.
   const load = useCallback(async () => {
     setLoadError(null);
-    setEnrichProgress(null);
+    setTableReady(false);
+    setFiles(null);
+    setEnrichProgress({ Done: 0, Total: 0 }); // Total узнаем из фазы 1
     try {
       const [st, fl] = await Promise.all([api.storage(), api.listFiles()]);
       setStorage(st);
       setFiles(fl);
+      setEnrichProgress({ Done: 0, Total: fl.length });
       setSelected((prev) => {
         const keys = new Set(fl.map(fileKey));
         return new Set([...prev].filter((k) => keys.has(k)));
       });
     } catch (err: unknown) {
       setLoadError(err instanceof Error ? err.message : String(err));
+      setEnrichProgress(null);
     }
   }, []);
 
@@ -87,7 +94,11 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
         prev ? prev.map((f) => (fileKey(f) === fileKey(fm) ? mergeEnriched(f, fm) : f)) : prev,
       );
     });
-    const offDone = Events.On('files:done', () => setEnrichProgress(null));
+    const offDone = Events.On('files:done', () => {
+      // Все файлы обработаны: показываем таблицу целиком.
+      setTableReady(true);
+      setEnrichProgress(null);
+    });
     return () => {
       offProgress();
       offEnriched();
@@ -241,34 +252,43 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
         </div>
       ) : null}
 
-      {files !== null && enrichProgress ? (
+      {/* Прогресс показываем сразу после запроса; Total появится, когда
+          фаза 1 отдаст список. Таблица — только после files:done. */}
+      {!tableReady && !loadError ? (
         <div
           className="enrich-bar"
           role="progressbar"
-          aria-valuenow={enrichProgress.Done}
+          aria-valuenow={enrichProgress?.Done ?? 0}
           aria-valuemin={0}
-          aria-valuemax={enrichProgress.Total}
+          aria-valuemax={enrichProgress?.Total ?? 0}
           aria-label={t('enriching')}
         >
-          <div
-            className="enrich-fill"
-            style={{ width: `${(enrichProgress.Done / enrichProgress.Total) * 100}%` }}
-          />
+          {enrichProgress && enrichProgress.Total > 0 ? (
+            <div
+              className="enrich-fill"
+              style={{ width: `${(enrichProgress.Done / enrichProgress.Total) * 100}%` }}
+            />
+          ) : null}
           <span className="enrich-label">
-            {t('enriching')} {enrichProgress.Done}/{enrichProgress.Total}
+            {t('enriching')}
+            {enrichProgress && enrichProgress.Total > 0
+              ? ` ${enrichProgress.Done}/${enrichProgress.Total}`
+              : ''}
           </span>
         </div>
       ) : null}
 
-      <FilesTable
-        files={files ?? []}
-        loading={loading}
-        selected={selected}
-        onToggle={toggle}
-        onToggleAll={toggleAll}
-      />
+      {tableReady && files !== null ? (
+        <FilesTable
+          files={files}
+          loading={false}
+          selected={selected}
+          onToggle={toggle}
+          onToggleAll={toggleAll}
+        />
+      ) : null}
 
-      {files !== null && !loading ? (
+      {tableReady && files !== null ? (
         <div className="footer-bar">
           <span className="footer-info">
             {t('selected')}: {selectedList.length}{' '}
