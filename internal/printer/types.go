@@ -30,6 +30,7 @@ type FileMeta struct {
 	Path      string   // полный путь на принтере (для удаления/ключа кэша)
 	Name      string   // basename
 	Size      int64    // байты
+	Epoch     int64    // unix-time загрузки (из WS-списка; 0 — неизвестно)
 	PrintTime *int     // секунды
 	Filament  *float64 // граммы
 	Thumb     string   // превью, data URI ("" — нет/ошибка)

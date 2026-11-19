@@ -510,6 +510,7 @@ body {
 .files-table tbody tr { border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
 .files-table tbody tr:hover { background: var(--glass-strong); }
 .files-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.files-table .date { white-space: nowrap; }
 .files-table .col-thumb { width: 52px; }
 .thumb {
     display: block;

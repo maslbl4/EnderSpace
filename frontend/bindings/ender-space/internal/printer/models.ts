@@ -22,6 +22,11 @@ export interface FileMeta {
     "Size": number;
 
     /**
+     * unix-time загрузки (из WS-списка; 0 — неизвестно)
+     */
+    "Epoch": number;
+
+    /**
      * секунды
      */
     "PrintTime": number | null;

@@ -257,6 +257,27 @@ func loadAppConfig(a *App) (*config.Config, error) {
 	return config.Load(a.cfgDir)
 }
 
+// Дата загрузки (epoch из WS-списка) доходит до UI: и в фазе 1,
+// и в обогащённых событиях.
+func TestListFilesCarriesUploadDate(t *testing.T) {
+	m := &mockPrinter{
+		files: []printer.RawFile{{Path: "/p", Name: "a.gcode", Size: 100, Epoch: 1795096114}},
+	}
+	app, rec := newTestAppWithEvents(t, m)
+
+	meta, err := app.ListFiles(context.Background())
+	if err != nil {
+		t.Fatalf("ListFiles: %v", err)
+	}
+	if meta[0].Epoch != 1795096114 {
+		t.Errorf("фаза 1: Epoch = %d, want 1795096114", meta[0].Epoch)
+	}
+	rec.waitForDone(t)
+	if got := rec.enrichedByName(t, "a.gcode").Epoch; got != 1795096114 {
+		t.Errorf("enriched: Epoch = %d, want 1795096114", got)
+	}
+}
+
 func TestListFilesMergesGcodeInfo(t *testing.T) {
 	m := &mockPrinter{
 		files: []printer.RawFile{

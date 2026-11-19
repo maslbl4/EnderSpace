@@ -52,6 +52,22 @@ export function formatDuration(totalSeconds: number): string {
   return `${Math.max(1, Math.round(totalSeconds))}${L.s}`;
 }
 
+// formatDate: «19.11.2026» / «11/19/2026»; 0/мусор — «—».
+export function formatDate(epochSeconds: number): string {
+  if (!epochSeconds) {
+    return '—';
+  }
+  const d = new Date(epochSeconds * 1000);
+  if (Number.isNaN(d.getTime())) {
+    return '—';
+  }
+  const p = (n: number) => String(n).padStart(2, '0');
+  const dd = p(d.getDate());
+  const mm = p(d.getMonth() + 1);
+  const yyyy = d.getFullYear();
+  return getLang() === 'en' ? `${mm}/${dd}/${yyyy}` : `${dd}.${mm}.${yyyy}`;
+}
+
 // formatGrams: «18 г» / «18 g», «45,2 г» / «45.2 g», «1 240 г» / «1,240 g».
 export function formatGrams(grams: number): string {
   const L = loc();

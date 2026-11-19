@@ -4,12 +4,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { t, useI18n } from '../i18n';
 import type { FileMeta } from '../lib/api';
-import { formatBytes, formatDuration, formatGrams } from '../lib/format';
+import { formatBytes, formatDate, formatDuration, formatGrams } from '../lib/format';
 
 // fileKey — идентичность файла для выбора (удаление работает по этим путям).
 export const fileKey = (f: FileMeta) => f.Path + '/' + f.Name;
 
-type SortKey = 'name' | 'size' | 'time' | 'plastic';
+type SortKey = 'name' | 'size' | 'date' | 'time' | 'plastic';
 
 // zoom — увеличенное превью (по центру окна, позиция в CSS).
 type Zoom = { src: string };
@@ -41,10 +41,16 @@ export default function FilesTable({
         const r = a.Name.localeCompare(b.Name, 'ru');
         return sortAsc ? r : -r;
       }
-      const va =
-        sortKey === 'size' ? a.Size : sortKey === 'time' ? a.PrintTime : a.Filament;
-      const vb =
-        sortKey === 'size' ? b.Size : sortKey === 'time' ? b.PrintTime : b.Filament;
+      const val = (f: FileMeta) =>
+        sortKey === 'size'
+          ? f.Size
+          : sortKey === 'date'
+            ? f.Epoch
+            : sortKey === 'time'
+              ? f.PrintTime
+              : f.Filament;
+      const va = val(a);
+      const vb = val(b);
       // «—» (null) — всегда внизу, независимо от направления.
       if (va == null && vb == null) return 0;
       if (va == null) return 1;
@@ -152,6 +158,10 @@ export default function FilesTable({
                   {t('colSize')}
                   {arrow('size')}
                 </th>
+                <th className="sortable" onClick={() => toggleSort('date')}>
+                  {t('colDate')}
+                  {arrow('date')}
+                </th>
                 <th className="sortable num" onClick={() => toggleSort('time')}>
                   {t('colTime')}
                   {arrow('time')}
@@ -197,6 +207,7 @@ export default function FilesTable({
                       ) : null}
                     </td>
                     <td className="num">{formatBytes(f.Size)}</td>
+                    <td className="date">{formatDate(f.Epoch)}</td>
                     <td className="num">
                       {f.PrintTime != null ? formatDuration(f.PrintTime) : '—'}
                     </td>

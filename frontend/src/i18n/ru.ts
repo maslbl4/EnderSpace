@@ -28,6 +28,7 @@ export const ru = {
   filesTitle: 'Файлы',
   colName: 'Имя файла',
   colSize: 'Размер',
+  colDate: 'Загружен',
   colTime: 'Время',
   colPlastic: 'Пластик',
   memoryEmpty: 'Память пуста',

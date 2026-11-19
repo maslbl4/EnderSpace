@@ -259,7 +259,7 @@ func (a *App) ListFiles(ctx context.Context) ([]printer.FileMeta, error) {
 // prefill — FileMeta без сетевых запросов: время/граммы из gcode-кэша,
 // превью из thumb-кэша (нет — nil/"", догонят события обогащения).
 func (a *App) prefill(rf printer.RawFile) printer.FileMeta {
-	fm := printer.FileMeta{Path: rf.Path, Name: rf.Name, Size: rf.Size}
+	fm := printer.FileMeta{Path: rf.Path, Name: rf.Name, Size: rf.Size, Epoch: rf.Epoch}
 	a.mu.Lock()
 	if info, ok := a.gcodeCache[gcodeCacheKey(rf)]; ok {
 		fm.PrintTime = info.TimeSeconds
@@ -358,7 +358,7 @@ func gcodeCacheKey(rf printer.RawFile) string {
 }
 
 func (a *App) enrich(ctx context.Context, client PrinterAPI, rf printer.RawFile) printer.FileMeta {
-	fm := printer.FileMeta{Path: rf.Path, Name: rf.Name, Size: rf.Size}
+	fm := printer.FileMeta{Path: rf.Path, Name: rf.Name, Size: rf.Size, Epoch: rf.Epoch}
 	key := gcodeCacheKey(rf)
 
 	a.mu.Lock()

@@ -28,6 +28,7 @@ export const en: Record<I18nKey, string> = {
   filesTitle: 'Files',
   colName: 'File name',
   colSize: 'Size',
+  colDate: 'Uploaded',
   colTime: 'Time',
   colPlastic: 'Plastic',
   memoryEmpty: 'Storage is empty',
