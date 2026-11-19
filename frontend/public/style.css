@@ -554,6 +554,11 @@ body {
 }
 .footer-info { color: var(--muted); font-size: 13.5px; }
 
+/* Без :disabled обычная .btn выглядела активной (кнопка «Печать» при
+   0/нескольких выбранных файлах) — тёмная, курсор pointer. */
+.btn:disabled { opacity: 0.4; cursor: default; box-shadow: none; }
+.btn:disabled:hover { box-shadow: none; }
+
 .btn-danger {
     background: rgba(255, 77, 77, 0.16);
     border: 1px solid rgba(255, 77, 77, 0.55);
