@@ -1,7 +1,7 @@
 // Таблица файлов: чекбокс / превью / имя / размер / время / пластик.
 // «—» — значение не найдено (всегда в конце сортировки); сортировка по
 // всем колонкам; скелетон во время загрузки; зум превью при наведении.
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { t } from '../i18n';
 import type { FileMeta } from '../lib/api';
 import { formatBytes, formatDuration, formatGrams } from '../lib/format';
@@ -63,7 +63,48 @@ export default function FilesTable({
   const arrow = (key: SortKey) =>
     sortKey === key ? (sortAsc ? ' ↑' : ' ↓') : '';
 
-  const showZoom = (src: string) => setZoom({ src });
+  // Зум-превью: показывается при наведении на миниатюру и пропадает, когда
+  // курсор уходит и с миниатюры, и с превью (короткая задержка, чтобы успеть
+  // «доехать» курсором до превью в центре окна). Escape тоже закрывает.
+  const HIDE_DELAY = 200; // мс
+  const hideTimer = useRef<number | null>(null);
+
+  const cancelHide = () => {
+    if (hideTimer.current !== null) {
+      window.clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+  };
+
+  const showZoom = (src: string) => {
+    cancelHide();
+    setZoom({ src });
+  };
+
+  const scheduleHide = () => {
+    cancelHide();
+    hideTimer.current = window.setTimeout(() => {
+      hideTimer.current = null;
+      setZoom(null);
+    }, HIDE_DELAY);
+  };
+
+  // Таймер не должен пережить размонтирование.
+  useEffect(() => cancelHide, []);
+
+  // Escape закрывает превью.
+  useEffect(() => {
+    if (!zoom) {
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setZoom(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [zoom]);
 
   const allChecked = files.length > 0 && selected.size === files.length;
 
@@ -140,6 +181,7 @@ export default function FilesTable({
                           loading="lazy"
                           decoding="async"
                           onMouseEnter={() => showZoom(f.Thumb)}
+                          onMouseLeave={scheduleHide}
                         />
                       ) : (
                         <span className="thumb thumb-none" aria-hidden />
@@ -168,7 +210,8 @@ export default function FilesTable({
         className="zoom-thumb"
         src={zoom.src}
         alt=""
-        onMouseLeave={() => setZoom(null)}
+        onMouseEnter={cancelHide}
+        onMouseLeave={scheduleHide}
       />
     ) : null}
     </>
