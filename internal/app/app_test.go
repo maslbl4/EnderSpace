@@ -25,6 +25,8 @@ type mockPrinter struct {
 	flaky       map[string]int    // name → остаток гарантированных сбоев (G-код)
 	thumbFlaky  map[string]int    // name → остаток гарантированных сбоев (превью)
 	deleteErr   map[string]error  // "path/name" → ошибка удаления
+	listLag     int               // файл исчезает из списка через N вызовов ListFiles (0 — сразу)
+	pendingDel  map[string]int    // "path|name" → остаток вызовов ListFiles до исчезновения
 	deleted     []string
 }
 
@@ -36,7 +38,21 @@ func (m *mockPrinter) Info(ctx context.Context) (printer.Info, error) {
 }
 
 func (m *mockPrinter) ListFiles(ctx context.Context) ([]printer.RawFile, error) {
-	return m.files, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// Принтер обрабатывает deleteprt асинхронно: файл исчезает из списка
+	// через listLag вызовов (pendingDel), а не мгновенно.
+	for key, left := range m.pendingDel {
+		if left <= 1 {
+			m.removeFile(key)
+			delete(m.pendingDel, key)
+		} else {
+			m.pendingDel[key] = left - 1
+		}
+	}
+	out := make([]printer.RawFile, len(m.files))
+	copy(out, m.files)
+	return out, nil
 }
 
 func (m *mockPrinter) DeleteFile(ctx context.Context, path, name string) error {
@@ -47,7 +63,30 @@ func (m *mockPrinter) DeleteFile(ctx context.Context, path, name string) error {
 		return err
 	}
 	m.deleted = append(m.deleted, key)
+	pathName := path + "|" + name
+	if m.listLag == 0 {
+		m.removeFile(pathName)
+		return nil
+	}
+	// Повторный deleteprt не ускоряет принтер: отсчёт идёт от первой операции.
+	if m.pendingDel == nil {
+		m.pendingDel = map[string]int{}
+	}
+	if _, ok := m.pendingDel[pathName]; !ok {
+		m.pendingDel[pathName] = m.listLag
+	}
 	return nil
+}
+
+// removeFile — исключает «path|name» из m.files (вызывать под m.mu).
+func (m *mockPrinter) removeFile(pathName string) {
+	out := m.files[:0]
+	for _, f := range m.files {
+		if f.Path+"|"+f.Name != pathName {
+			out = append(out, f)
+		}
+	}
+	m.files = out
 }
 
 func (m *mockPrinter) DownloadGcode(ctx context.Context, name string) (io.ReadCloser, error) {
@@ -247,28 +286,19 @@ func TestListFilesParserFailureKeepsFile(t *testing.T) {
 	}
 }
 
-func TestDeleteFilesPartial(t *testing.T) {
-	m := &mockPrinter{
-		deleteErr: map[string]error{"/p/b.gcode": errors.New("mock: отказ")},
-	}
-	app := newTestApp(t, m)
-	app.connected = true
-	app.client = m
-
-	err := app.DeleteFiles(context.Background(), []string{"/p/a.gcode", "/p/b.gcode"})
-	if err == nil {
-		t.Fatal("ожидалась ошибка (не все файлы удалены)")
-	}
-	if !strings.Contains(err.Error(), "1 of 2") {
-		t.Errorf("отчёт об ошибке = %q, want упоминание «1 of 2»", err.Error())
-	}
-	if len(m.deleted) != 1 || m.deleted[0] != "/p/a.gcode" {
-		t.Errorf("deleted = %v, want [/p/a.gcode]", m.deleted)
-	}
+// fastDeletes — сокращает паузу сверки после deleteprt (1.5 c) в тестах.
+func fastDeletes(t *testing.T) {
+	t.Helper()
+	old := deleteCheckDelay
+	deleteCheckDelay = 5 * time.Millisecond
+	t.Cleanup(func() { deleteCheckDelay = old })
 }
 
 func TestDeleteFilesAllOK(t *testing.T) {
-	m := &mockPrinter{}
+	fastDeletes(t)
+	m := &mockPrinter{
+		files: []printer.RawFile{{Path: "/p", Name: "a.gcode", Size: 100}},
+	}
 	app := newTestApp(t, m)
 	app.connected = true
 	app.client = m
@@ -278,6 +308,63 @@ func TestDeleteFilesAllOK(t *testing.T) {
 	}
 	if len(m.deleted) != 1 || m.deleted[0] != "/p/a.gcode" {
 		t.Errorf("deleted = %v", m.deleted)
+	}
+	if len(m.files) != 0 {
+		t.Errorf("файл должен исчезнуть из списка, осталось %d", len(m.files))
+	}
+}
+
+// Принтер не шлёт ack на deleteprt и обрабатывает его асинхронно: файл
+// исчезает из списка только на 2-й проверке. DeleteFiles должен дождаться
+// и повторной отправкой — и завершить успехом.
+func TestDeleteFilesDelayedProcessing(t *testing.T) {
+	fastDeletes(t)
+	m := &mockPrinter{
+		files:   []printer.RawFile{{Path: "/p", Name: "a.gcode", Size: 100}},
+		listLag: 2, // исчезнет после 2-го ListFiles
+	}
+	app := newTestApp(t, m)
+	app.connected = true
+	app.client = m
+
+	if err := app.DeleteFiles(context.Background(), []string{"/p/a.gcode"}); err != nil {
+		t.Fatalf("DeleteFiles: %v (принтер обработал, просто с задержкой)", err)
+	}
+	if len(m.files) != 0 {
+		t.Errorf("файл должен исчезнуть из списка, осталось %d", len(m.files))
+	}
+	if len(m.deleted) < 1 {
+		t.Errorf("deleteprt должен был уйти, deleted = %v", m.deleted)
+	}
+}
+
+// b.gcode принтер «не слышит» (WS-отказ) и файл остаётся в списке:
+// после всех раундов — честный отчёт «deleted 1 of 2».
+func TestDeleteFilesStillPresent(t *testing.T) {
+	fastDeletes(t)
+	m := &mockPrinter{
+		files: []printer.RawFile{
+			{Path: "/p", Name: "a.gcode", Size: 100},
+			{Path: "/p", Name: "b.gcode", Size: 200},
+		},
+		deleteErr: map[string]error{"/p/b.gcode": errors.New("mock: отказ")},
+	}
+	app := newTestApp(t, m)
+	app.connected = true
+	app.client = m
+
+	err := app.DeleteFiles(context.Background(), []string{"/p/a.gcode", "/p/b.gcode"})
+	if err == nil {
+		t.Fatal("ожидалась ошибка (b.gcode остался на принтере)")
+	}
+	if !strings.Contains(err.Error(), "1 of 2") {
+		t.Errorf("отчёт об ошибке = %q, want упоминание «1 of 2»", err.Error())
+	}
+	if len(m.deleted) != 1 || m.deleted[0] != "/p/a.gcode" {
+		t.Errorf("deleted = %v, want [/p/a.gcode]", m.deleted)
+	}
+	if len(m.files) != 1 || m.files[0].Name != "b.gcode" {
+		t.Errorf("в списке должен остаться только b.gcode, got %v", m.files)
 	}
 }
 

@@ -23,8 +23,11 @@ export function Connect(ip: string): $CancellablePromise<void> {
 }
 
 /**
- * DeleteFiles удаляет файлы последовательно. paths — полные пути
- * «<path>/<name>». Если не все удалены — ошибка с отчётом «deleted k of n».
+ * DeleteFiles удаляет файлы и УБЕЖДается в этом: принтер не шлёт ack на
+ * deleteprt и под нагрузкой обрабатывает операцию с задержкой (или
+ * пропускает), поэтому после каждого раунда сверяемся с WS-списком и
+ * остаткам повторяем. paths — полные пути «<path>/<name>».
+ * Не всё удалилось — ошибка «deleted k of n» (фронтенд локализует по числам).
  */
 export function DeleteFiles(paths: string[] | null): $CancellablePromise<void> {
     return $Call.ByID(2237329087, paths);

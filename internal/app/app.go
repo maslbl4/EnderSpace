@@ -58,7 +58,9 @@ const gcodeHeadBytes = 256 * 1024
 const thumbLimit = 1 << 20
 
 // enrichWorkers — параллелизм скачивания G-кодов при фоновом обогащении.
-const enrichWorkers = 8
+// 4, а не 8: при 8 параллельных докачках eMMC-принтер «захлёбывался»
+// (минуты таймаутов /info и WS после bursts из 58 файлов).
+const enrichWorkers = 4
 
 // retryDelays — паузы перед ретраями докачки (3 ретрая → 4 попытки).
 // var, а не const: тесты подменяют на миллисекунды.
@@ -481,30 +483,72 @@ func (a *App) thumb(ctx context.Context, client PrinterAPI, rf printer.RawFile, 
 	return v
 }
 
-// DeleteFiles удаляет файлы последовательно. paths — полные пути
-// «<path>/<name>». Если не все удалены — ошибка с отчётом «deleted k of n».
+// deleteCheckDelay — пауза между отправкой deleteprt и проверкой списка:
+// принтер обрабатывает операцию асинхронно, без ack, и под нагрузкой
+// (сразу после bursts скачиваний) — заметно дольше. var для тестов.
+var deleteCheckDelay = 1500 * time.Millisecond
+
+// deleteMaxRounds — раундов «отправить → подождать → сверить со списком».
+// Остаткам каждый раунд шлём deleteprt повторно.
+const deleteMaxRounds = 3
+
+// DeleteFiles удаляет файлы и УБЕЖДается в этом: принтер не шлёт ack на
+// deleteprt и под нагрузкой обрабатывает операцию с задержкой (или
+// пропускает), поэтому после каждого раунда сверяемся с WS-списком и
+// остаткам повторяем. paths — полные пути «<path>/<name>».
+// Не всё удалилось — ошибка «deleted k of n» (фронтенд локализует по числам).
 func (a *App) DeleteFiles(ctx context.Context, paths []string) error {
 	client, ok := a.activeClient()
 	if !ok {
 		return errors.New("принтер не подключён")
 	}
-	var done int
+
 	var firstErr error
-	for _, p := range paths {
-		dir, name := path.Split(p) // dir всегда с завершающим "/"
-		if err := client.DeleteFile(ctx, strings.TrimSuffix(dir, "/"), name); err != nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("%s: %w", p, err)
-			}
-			continue
+	fail := func(p string, err error) {
+		if firstErr == nil {
+			firstErr = fmt.Errorf("%s: %w", p, err)
 		}
-		done++
 	}
-	if firstErr != nil {
-		// Сообщение на английском: фронтенд сам локализует отчёт по числам.
-		return fmt.Errorf("deleted %d of %d: %v", done, len(paths), firstErr)
+	send := func(list []string) {
+		for _, p := range list {
+			dir, name := path.Split(p) // dir всегда с завершающим "/"
+			if err := client.DeleteFile(ctx, strings.TrimSuffix(dir, "/"), name); err != nil {
+				fail(p, err)
+			}
+		}
 	}
-	return nil
+
+	remaining := paths
+	for round := 0; round < deleteMaxRounds; round++ {
+		send(remaining)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(deleteCheckDelay):
+		}
+		files, err := client.ListFiles(ctx)
+		if err != nil {
+			fail("", err)
+			continue // список не сверишь — в следующем раунде повторим остаток
+		}
+		present := make(map[string]bool, len(files))
+		for _, f := range files {
+			present[f.Path+"|"+f.Name] = true
+		}
+		remaining = nil
+		for _, p := range paths {
+			dir, name := path.Split(p)
+			if present[strings.TrimSuffix(dir, "/")+"|"+name] {
+				remaining = append(remaining, p)
+			}
+		}
+		if len(remaining) == 0 {
+			return nil
+		}
+	}
+	// English on purpose: the frontend localizes the report by the numbers.
+	return fmt.Errorf("deleted %d of %d: still on the printer: %v",
+		len(paths)-len(remaining), len(paths), remaining)
 }
 
 // activeClient возвращает активный клиент; ok=false — если не подключены.
