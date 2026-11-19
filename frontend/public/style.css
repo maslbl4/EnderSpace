@@ -208,12 +208,39 @@ body {
     user-select: text;
     cursor: text;
 }
-.last {
+/* Недавние принтеры (localstorage): пилюли под полем IP. Клик —
+   подставляет адрес в поле. */
+.recent {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
     margin: var(--s-1) 2px 0;
+}
+.recent-label {
     color: var(--muted);
-    font-size: 13.5px;
-    -webkit-user-select: text;
-    user-select: text;
+    font-size: 13px;
+}
+.recent-chip {
+    padding: 3px 10px;
+    border: 1px solid var(--glass-border);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text);
+    font-size: 12.5px;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+    -webkit-user-select: none;
+    user-select: none;
+}
+.recent-chip:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 77, 77, 0.45);
+}
+.recent-chip:disabled {
+    opacity: 0.5;
+    cursor: default;
 }
 
 /* ----- Main screen ----------------------------------------------------------

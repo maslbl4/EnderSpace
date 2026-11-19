@@ -1,9 +1,43 @@
-// Экран подключения: поле IP + «Подключить» + последнее значение из конфига.
-import { useEffect, useState } from 'react';
+// Экран подключения: поле IP + «Подключить» + недавние принтеры (localstorage).
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { t, useI18n } from '../i18n';
 import { api } from '../lib/api';
 import LangToggle from './LangToggle';
+
+// recentIPs — IP успешно подключённых принтеров в localstorage:
+// свежие вперёд, без дублей, максимум RECENT_LIMIT.
+const RECENT_KEY = 'enderspace.recentIPs';
+const RECENT_LIMIT = 5;
+
+function loadRecent(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    if (!raw) {
+      return [];
+    }
+    const list = JSON.parse(raw);
+    return Array.isArray(list) ? list.filter((v) => typeof v === 'string') : [];
+  } catch {
+    return []; // localstorage недоступен/мусор — без подсказок
+  }
+}
+
+function saveRecent(ip: string): string[] {
+  const next = [ip, ...loadRecent().filter((v) => v !== ip)].slice(0, RECENT_LIMIT);
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch {
+    /* запись не критична */
+  }
+  return next;
+}
+
+// normalizeIp — то же, что нормализация в Go: без scheme и хвостового "/".
+function normalizeIp(ip: string): string {
+  const v = ip.trim();
+  return v.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+}
 
 // validIp — формат a.b.c.d (0–255), ничего больше (hostname не поддерживаем).
 function validIp(ip: string): boolean {
@@ -17,22 +51,13 @@ function validIp(ip: string): boolean {
 export default function ConnectionScreen({ onConnected }: { onConnected: () => void }) {
   useI18n(); // перерисовка при смене языка
   const [ip, setIp] = useState('');
-  const [lastIp, setLastIp] = useState('');
+  const [recent, setRecent] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  // Последний IP из конфига бэкенда (показ под полем, не подставляется).
   useEffect(() => {
-    api
-      .status()
-      .then((st) => {
-        if (!st.Connected && st.IP) {
-          setLastIp(st.IP);
-        }
-      })
-      .catch(() => {
-        /* бэкенд не готов — без подсказки */
-      });
+    setRecent(loadRecent());
   }, []);
 
   const submit = (e: FormEvent) => {
@@ -49,9 +74,18 @@ export default function ConnectionScreen({ onConnected }: { onConnected: () => v
     setError(null);
     api
       .connect(value)
-      .then(() => onConnected())
+      .then(() => {
+        setRecent(saveRecent(normalizeIp(value))); // только успешные подключения
+        onConnected();
+      })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setBusy(false));
+  };
+
+  const pick = (v: string) => {
+    setIp(v);
+    setError(null);
+    inputRef.current?.focus();
   };
 
   return (
@@ -72,6 +106,7 @@ export default function ConnectionScreen({ onConnected }: { onConnected: () => v
         </label>
         <div className="input-box">
           <input
+            ref={inputRef}
             id="printer-ip"
             className="input"
             type="text"
@@ -93,10 +128,22 @@ export default function ConnectionScreen({ onConnected }: { onConnected: () => v
           </button>
         </div>
         {error ? <p className="error">{error}</p> : null}
-        {lastIp ? (
-          <p className="last">
-            {t('lastPrinter')}: {lastIp}
-          </p>
+        {recent.length > 0 ? (
+          <div className="recent">
+            <span className="recent-label">{t('recentPrinters')}:</span>
+            {recent.map((v) => (
+              <button
+                key={v}
+                type="button"
+                className="recent-chip"
+                title={v}
+                disabled={busy}
+                onClick={() => pick(v)}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
         ) : null}
       </form>
     </main>

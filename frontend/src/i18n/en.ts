@@ -8,7 +8,7 @@ export const en: Record<I18nKey, string> = {
   ipPlaceholder: '192.168.3.100',
   connect: 'Connect',
   connecting: 'Connecting…',
-  lastPrinter: 'Last address',
+  recentPrinters: 'Recent',
   errorBadIP: 'Enter an IP like 192.168.3.100',
   online: 'online',
   printing: 'Printing',

@@ -8,7 +8,7 @@ export const ru = {
   ipPlaceholder: '192.168.3.100',
   connect: 'Подключить',
   connecting: 'Подключение…',
-  lastPrinter: 'Последний адрес',
+  recentPrinters: 'Недавние',
   errorBadIP: 'Введите IP в формате 192.168.3.100',
   online: 'онлайн',
   printing: 'Печатает',
