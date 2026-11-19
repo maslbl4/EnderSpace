@@ -63,7 +63,7 @@ export default function FilesTable({
   const arrow = (key: SortKey) =>
     sortKey === key ? (sortAsc ? ' ↑' : ' ↓') : '';
 
-  const showZoom = (src: string) => setZoom({ src, x: 0, y: 0 });
+  const showZoom = (src: string) => setZoom({ src });
 
   const allChecked = files.length > 0 && selected.size === files.length;
 
