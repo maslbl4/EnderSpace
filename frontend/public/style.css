@@ -759,11 +759,12 @@ input[type="text"] {
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    box-shadow: 0 6px 18px rgba(255, 45, 114, 0.35);
+    /* Симметричный glow: со смещением (0 6px) свечение было только снизу. */
+    box-shadow: 0 0 18px rgba(255, 45, 114, 0.35);
     transition: transform 0.1s ease, box-shadow 0.2s ease, opacity 0.2s ease;
 }
 .btn svg { width: 17px; height: 17px; }
-.btn:hover { box-shadow: 0 8px 24px rgba(255, 45, 114, 0.5); }
+.btn:hover { box-shadow: 0 0 24px rgba(255, 45, 114, 0.5); }
 .btn:active { transform: scale(0.97); }
 
 /* ----- Toast (the reply from Go) ------------------------------------------- */
