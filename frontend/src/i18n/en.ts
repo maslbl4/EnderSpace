@@ -22,6 +22,8 @@ export const en: Record<I18nKey, string> = {
   storageFree: 'Free',
   storageTotal: 'Total',
   storageEmmc: 'eMMC',
+  storageSystem: 'System',
+  storageSystemNote: 'firmware and system files',
   filesTitle: 'Files',
   colName: 'File name',
   colSize: 'Size',

@@ -56,11 +56,24 @@ export interface PrinterStatus {
 }
 
 /**
- * Storage — ёмкость внутренней памяти (eMMC). Total может быть оценкой
- * (константа из конфига), т.к. у принтера нет df-эндпоинта.
+ * Storage — ёмкость внутренней памяти (eMMC). Total и System — оценки
+ * (константы из конфига), т.к. у принтера нет df-эндпоинта.
  */
 export interface Storage {
     "Total": number;
+
+    /**
+     * пользовательские G-коды
+     */
     "Used": number;
+
+    /**
+     * прошивка + системные файлы (оценка)
+     */
+    "System": number;
+
+    /**
+     * Total − Used − System (оценка)
+     */
     "Free": number;
 }

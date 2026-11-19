@@ -53,8 +53,8 @@ export function Status(): $CancellablePromise<printer$0.PrinterStatus> {
 }
 
 /**
- * Storage — ёмкость памяти: total из конфига, used = сумма размеров,
- * free = total − used (оценка «≈»: eMMC общая с прошивкой).
+ * Storage — ёмкость памяти: total и system из конфига (оценки «≈», принтер
+ * df не отдаёт), used = сумма размеров G-кодов, free = total − used − system.
  */
 export function Storage(): $CancellablePromise<printer$0.Storage> {
     return $Call.ByID(2038372944);

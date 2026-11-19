@@ -13,7 +13,8 @@
 A desktop app (Go + WebView via [Wails v3](https://v3.wails.io)) for managing the internal
 storage of a Creality Ender-3 V3 KE printer:
 
-- Internal storage: used / free / total (8 GB eMMC, shared with firmware — values are estimates)
+- Internal storage: used / free / total (8 GB eMMC, shared with firmware — values are
+  estimates, with a separate estimated firmware/system line)
 - G-code file list: name, size, print time, filament in grams (parsed from the G-code header,
   with fallbacks), high-quality previews
 - Batch file deletion with a confirmation dialog and a partial-failure report
@@ -50,6 +51,8 @@ Building, debugging and configuration docs are below (in Russian).
 **Память**
 - Занято / свободно / всего для 8 GB eMMC (оценка «≈» — память общая с прошивкой)
 - Занято = сумма размеров файлов
+- Система (прошивка + системные файлы) — отдельной строкой, оценка
+  (`systemBytes` в конфиге, дефолт 512 МБ; принтер реальный объём не отдаёт)
 
 **Файлы**
 - Имя, размер, время печати, граммы филамента
@@ -165,6 +168,7 @@ go run ./tools/probe 192.168.3.166 [имя-файла.gcode]
 |---|---|
 | `lastIP` | IP последнего принтера (подстановка при запуске) |
 | `totalBytes` | Общая ёмкость eMMC; не задан → 8 GiB |
+| `systemBytes` | Оценка прошивки + системных файлов; не задан → 512 MiB |
 
 ---
 

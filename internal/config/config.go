@@ -15,10 +15,16 @@ const Filename = "config.json"
 // прошивкой; принтер не отдаёт df, поэтому total — константа из конфига).
 const DefaultTotalBytes int64 = 8 * 1024 * 1024 * 1024
 
+// DefaultSystemBytes — оценка объёма прошивки и системных файлов по
+// умолчанию: 512 MiB (среднее экспертного диапазона 300–800 МБ для принтеров
+// этого класса; принтер реальный объём системы не сообщает).
+const DefaultSystemBytes int64 = 512 * 1024 * 1024
+
 // Config — настройки приложения.
 type Config struct {
-	LastIP     string `json:"lastIP"`
-	TotalBytes int64  `json:"totalBytes,omitempty"`
+	LastIP      string `json:"lastIP"`
+	TotalBytes  int64  `json:"totalBytes,omitempty"`
+	SystemBytes int64  `json:"systemBytes,omitempty"`
 }
 
 // Total — общая ёмкость памяти: явный TotalBytes или дефолт 8 GiB.
@@ -27,6 +33,15 @@ func (c *Config) Total() int64 {
 		return c.TotalBytes
 	}
 	return DefaultTotalBytes
+}
+
+// System — оценка объёма прошивки и системных файлов: явный SystemBytes
+// или дефолт 512 MiB.
+func (c *Config) System() int64 {
+	if c.SystemBytes > 0 {
+		return c.SystemBytes
+	}
+	return DefaultSystemBytes
 }
 
 // Load читает config.json из dir. Отсутствующий или повреждённый файл —

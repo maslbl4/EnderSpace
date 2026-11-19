@@ -267,8 +267,11 @@ func TestStorageSumsSizes(t *testing.T) {
 	if st.Used != 300 {
 		t.Errorf("Used = %d, want 300", st.Used)
 	}
-	if st.Free != st.Total-300 {
-		t.Errorf("Free = %d, want Total-Used = %d", st.Free, st.Total-300)
+	if st.System != config.DefaultSystemBytes {
+		t.Errorf("System = %d, want дефолт %d", st.System, config.DefaultSystemBytes)
+	}
+	if st.Free != st.Total-300-st.System {
+		t.Errorf("Free = %d, want Total-Used-System = %d", st.Free, st.Total-300-st.System)
 	}
 }
 

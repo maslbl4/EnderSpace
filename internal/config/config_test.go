@@ -20,6 +20,16 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	if c.Total() != DefaultTotalBytes {
 		t.Errorf("Total() = %d, want %d", c.Total(), DefaultTotalBytes)
 	}
+	if c.System() != DefaultSystemBytes {
+		t.Errorf("System() = %d, want %d", c.System(), DefaultSystemBytes)
+	}
+}
+
+func TestSystemBytesExplicit(t *testing.T) {
+	c := &Config{SystemBytes: 256 * 1024 * 1024}
+	if c.System() != 256*1024*1024 {
+		t.Errorf("System() = %d, want явные 256 MiB", c.System())
+	}
 }
 
 func TestSaveLoadRoundTrip(t *testing.T) {

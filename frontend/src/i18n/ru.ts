@@ -22,6 +22,8 @@ export const ru = {
   storageFree: 'Свободно',
   storageTotal: 'Всего',
   storageEmmc: 'eMMC',
+  storageSystem: 'Система',
+  storageSystemNote: 'прошивка и системные файлы',
   filesTitle: 'Файлы',
   colName: 'Имя файла',
   colSize: 'Размер',

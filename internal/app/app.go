@@ -163,8 +163,8 @@ func (a *App) Status() printer.PrinterStatus {
 	return st
 }
 
-// Storage — ёмкость памяти: total из конфига, used = сумма размеров,
-// free = total − used (оценка «≈»: eMMC общая с прошивкой).
+// Storage — ёмкость памяти: total и system из конфига (оценки «≈», принтер
+// df не отдаёт), used = сумма размеров G-кодов, free = total − used − system.
 func (a *App) Storage() (printer.Storage, error) {
 	client, ok := a.activeClient()
 	if !ok {
@@ -179,11 +179,12 @@ func (a *App) Storage() (printer.Storage, error) {
 		used += f.Size
 	}
 	total := a.cfg.Total()
-	free := total - used
+	system := a.cfg.System()
+	free := total - used - system
 	if free < 0 {
 		free = 0
 	}
-	return printer.Storage{Total: total, Used: used, Free: free}, nil
+	return printer.Storage{Total: total, Used: used, System: system, Free: free}, nil
 }
 
 // ListFiles — список файлов, обогащённый временем печати и граммами из

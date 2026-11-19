@@ -1,6 +1,10 @@
 package printer
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"sort"
+	"strings"
+)
 
 // Info — ответ GET /info.
 type Info struct {
@@ -31,12 +35,13 @@ type FileMeta struct {
 	Thumb     string   // превью, data URI ("" — нет/ошибка)
 }
 
-// Storage — ёмкость внутренней памяти (eMMC). Total может быть оценкой
-// (константа из конфига), т.к. у принтера нет df-эндпоинта.
+// Storage — ёмкость внутренней памяти (eMMC). Total и System — оценки
+// (константы из конфига), т.к. у принтера нет df-эндпоинта.
 type Storage struct {
-	Total int64
-	Used  int64
-	Free  int64
+	Total  int64
+	Used   int64 // пользовательские G-коды
+	System int64 // прошивка + системные файлы (оценка)
+	Free   int64 // Total − Used − System (оценка)
 }
 
 // PrinterStatus — текущее состояние подключения.
@@ -71,6 +76,25 @@ func (s *State) Merge(raw []byte) error {
 		s.data[k] = v
 	}
 	return nil
+}
+
+// Dump — все накопленные поля состояния одной строкой (для логов/диагностики).
+func (s *State) Dump() string {
+	keys := make([]string, 0, len(s.data))
+	for k := range s.data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteString(" ")
+		}
+		b.WriteString(k)
+		b.WriteString("=")
+		b.Write(s.data[k])
+	}
+	return b.String()
 }
 
 // Int возвращает целочисленное поле состояния (отсутствует/не число → ok=false).

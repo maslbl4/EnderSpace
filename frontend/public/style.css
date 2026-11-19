@@ -343,6 +343,7 @@ body {
 
 /* Storage meter. */
 .meter {
+    display: flex;
     height: 10px;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.08);
@@ -354,6 +355,8 @@ body {
     background: var(--grad);
     transition: width 0.4s ease;
 }
+/* Сегмент «система» (прошивка) — приглушённый, чтобы отличался от файлов. */
+.meter-system { background: rgba(255, 255, 255, 0.28); }
 .storage-line {
     margin: var(--s-1) 0 0;
     color: var(--muted);
