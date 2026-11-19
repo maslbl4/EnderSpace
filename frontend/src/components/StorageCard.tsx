@@ -9,7 +9,7 @@ import type { Storage } from '../lib/api';
 import { formatBytes } from '../lib/format';
 
 // tip — содержимое тултипа над наведённым сегментом шкалы.
-type Tip = { x: number; y: number; label: string; value: string; note?: string };
+type Tip = { x: number; y: number; label: string; value: string };
 
 export default function StorageCard({ storage }: { storage: Storage }) {
   useI18n(); // перерисовка при смене языка
@@ -27,20 +27,17 @@ export default function StorageCard({ storage }: { storage: Storage }) {
     if (pct < filesPct) {
       tip = { x: e.clientX, y: e.clientY, label: t('legendModels'), value: formatBytes(storage.Used) };
     } else if (pct < filesPct + systemPct) {
-      tip = {
-        x: e.clientX,
-        y: e.clientY,
-        label: t('storageSystem'),
-        value: `≈ ${formatBytes(storage.System)}`,
-        note: t('storageSystemNote'),
-      };
+      tip = { x: e.clientX, y: e.clientY, label: t('storageSystem'), value: `≈ ${formatBytes(storage.System)}` };
     } else {
       tip = { x: e.clientX, y: e.clientY, label: t('storageFree'), value: `≈ ${formatBytes(storage.Free)}` };
     }
     setTip(tip);
   };
 
+  // Тултип вне <section>: .card использует backdrop-filter, что делает её
+  // containing block для position: fixed (координаты бы «поехали»).
   return (
+    <>
     <section className="card storage-card">
       <h2 className="card-title">{t('storageTitle')}</h2>
       <div
@@ -62,19 +59,19 @@ export default function StorageCard({ storage }: { storage: Storage }) {
         </span>
         <span className="legend-item">
           <span className="legend-dot legend-dot-system" aria-hidden />
-          {t('storageSystem')} ≈ {formatBytes(storage.System)} · {t('storageSystemNote')}
+          {t('storageSystem')} ≈ {formatBytes(storage.System)}
         </span>
       </div>
       <p className="storage-line">
         {t('storageFree')} ≈ {formatBytes(storage.Free)} · {t('storageTotal')}{' '}
         {formatBytes(storage.Total)} ({t('storageEmmc')})
       </p>
-      {tip ? (
-        <div className="meter-tip" style={{ left: tip.x + 14, top: tip.y + 16 }}>
-          <span className="meter-tip-label">{tip.label}</span> {tip.value}
-          {tip.note ? <span className="meter-tip-note"> · {tip.note}</span> : null}
-        </div>
-      ) : null}
     </section>
+    {tip ? (
+      <div className="meter-tip" style={{ left: tip.x + 14, top: tip.y + 16 }}>
+        <span className="meter-tip-label">{tip.label}</span> {tip.value}
+      </div>
+    ) : null}
+    </>
   );
 }

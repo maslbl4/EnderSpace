@@ -23,7 +23,6 @@ export const ru = {
   storageTotal: 'Всего',
   storageEmmc: 'eMMC',
   storageSystem: 'Система',
-  storageSystemNote: 'прошивка и системные файлы',
   legendModels: 'Модели (G-коды)',
   filesTitle: 'Файлы',
   colName: 'Имя файла',
