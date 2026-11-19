@@ -30,6 +30,11 @@ export interface FileMeta {
      * граммы
      */
     "Filament": number | null;
+
+    /**
+     * превью, data URI ("" — нет/ошибка)
+     */
+    "Thumb": string;
 }
 
 /**

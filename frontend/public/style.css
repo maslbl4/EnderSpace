@@ -216,6 +216,221 @@ body {
     user-select: text;
 }
 
+/* ----- Main screen ----------------------------------------------------------
+   Header row (brand + actions) over a column of glass cards. */
+.main {
+    max-width: 860px;
+    justify-content: flex-start;      /* top-aligned: data, not a hero */
+}
+.main-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--s-2);
+    width: 100%;
+}
+.brand { margin-bottom: 0; }
+.main-subtitle { margin-bottom: var(--s-3); }
+.head-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--s-1);
+    --wails-draggable: no-drag;
+}
+.icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--glass-border);
+    border-radius: 9px;
+    background: var(--glass);
+    color: var(--text);
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+    transition: border-color 0.2s ease, transform 0.1s ease;
+}
+.icon-btn:hover { border-color: rgba(255, 77, 77, 0.55); }
+.icon-btn:active { transform: scale(0.94); }
+.icon-btn:disabled { opacity: 0.45; cursor: default; }
+
+.btn-ghost {
+    background: var(--glass);
+    box-shadow: none;
+    border: 1px solid var(--glass-border);
+}
+.btn-ghost:hover { border-color: rgba(255, 77, 77, 0.55); box-shadow: none; }
+.btn-small {
+    padding: 4px 12px;
+    font-size: 13px;
+    border-radius: 7px;
+}
+
+/* Status dot in the badge; warn = amber (printing). */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 0;
+    font-size: 12.5px;
+}
+.dot { width: 7px; height: 7px; border-radius: 50%; background: #3ddc84; box-shadow: 0 0 8px #3ddc84; }
+.dot-warn { background: #ffb020; box-shadow: 0 0 8px #ffb020; }
+.badge-warn {
+    color: #ffd28a;
+    background: rgba(255, 176, 32, 0.12);
+    border-color: rgba(255, 176, 32, 0.35);
+}
+
+/* Banners: warn (printing) / error (load failed, with Retry). */
+.banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-2);
+    width: 100%;
+    margin-bottom: var(--s-2);
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    border: 1px solid rgba(255, 176, 32, 0.35);
+    background: rgba(255, 176, 32, 0.10);
+    color: #ffd28a;
+    font-size: 14px;
+    line-height: 1.4;
+}
+.banner-error {
+    border-color: rgba(255, 77, 77, 0.4);
+    background: rgba(255, 77, 77, 0.10);
+    color: #ff8091;
+}
+.banner-text {
+    min-width: 0;
+    overflow-wrap: break-word;
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+/* Cards (storage / files) on the glass language. */
+.card {
+    width: 100%;
+    margin-bottom: var(--s-2);
+    padding: var(--s-2) var(--s-3);
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    border-radius: calc(var(--radius) + 3px);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+}
+.card-title {
+    margin: 0 0 var(--s-2);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    color: var(--text);
+}
+
+/* Storage meter. */
+.meter {
+    height: 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+}
+.meter-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: var(--grad);
+    transition: width 0.4s ease;
+}
+.storage-line {
+    margin: var(--s-1) 0 0;
+    color: var(--muted);
+    font-size: 13.5px;
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+/* Files table. */
+.table-wrap {
+    overflow-x: auto;
+    max-height: 46vh;
+    overflow-y: auto;
+}
+.files-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+.files-table th, .files-table td {
+    padding: 8px 10px;
+    text-align: left;
+    white-space: nowrap;
+}
+.files-table thead th {
+    color: var(--muted);
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    border-bottom: 1px solid var(--glass-border);
+    position: sticky;
+    top: 0;
+    background: rgba(13, 17, 28, 0.92);
+}
+.files-table tbody tr { border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+.files-table tbody tr:hover { background: var(--glass-strong); }
+.files-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.files-table .col-thumb { width: 52px; }
+.thumb {
+    display: block;
+    width: 44px;
+    height: 44px;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 1px solid var(--glass-border);
+    background: rgba(255, 255, 255, 0.04);
+}
+.thumb-none {
+    display: block;
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    border: 1px dashed var(--glass-border);
+    background: rgba(255, 255, 255, 0.02);
+}
+.files-table .name {
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    -webkit-user-select: text;
+    user-select: text;
+}
+.files-table .sortable { cursor: pointer; user-select: none; }
+.files-table .col-check { width: 34px; }
+
+/* Loading skeleton + empty state. */
+.skeleton { display: flex; flex-direction: column; gap: 10px; }
+.skeleton-row {
+    height: 26px;
+    border-radius: 7px;
+    background: linear-gradient(90deg,
+        rgba(255, 255, 255, 0.05) 25%, rgba(255, 255, 255, 0.11) 50%,
+        rgba(255, 255, 255, 0.05) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease infinite;
+}
+@keyframes shimmer {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+}
+.empty {
+    margin: var(--s-2) 0;
+    color: var(--muted);
+    font-size: 14px;
+    text-align: center;
+}
+
 /* Input font is pinned at 16px: iOS Safari/WKWebView zooms the page when an
    input under 16px gains focus, so the whole control is sized around that.
    Tight vertical padding keeps it ~36px tall, icon : control ≈ 1 : φ. */

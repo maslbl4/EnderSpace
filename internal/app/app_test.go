@@ -19,6 +19,7 @@ type mockPrinter struct {
 	infoOK      bool
 	files       []printer.RawFile
 	gcode       map[string][]byte // name → тело G-кода
+	thumbs      map[string][]byte // name → PNG превью
 	downloadErr map[string]error  // name → ошибка скачивания
 	deleteErr   map[string]error  // "path/name" → ошибка удаления
 	deleted     []string
@@ -55,6 +56,16 @@ func (m *mockPrinter) DownloadGcode(ctx context.Context, name string) (io.ReadCl
 	body, ok := m.gcode[name]
 	if !ok {
 		return nil, errors.New("mock: файл не найден")
+	}
+	return io.NopCloser(bytes.NewReader(body)), nil
+}
+
+func (m *mockPrinter) DownloadThumbnail(ctx context.Context, name string) (io.ReadCloser, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	body, ok := m.thumbs[name]
+	if !ok {
+		return nil, errors.New("mock: превью не найдено")
 	}
 	return io.NopCloser(bytes.NewReader(body)), nil
 }
@@ -269,6 +280,96 @@ func (c *countingDownloader) DownloadGcode(ctx context.Context, name string) (io
 	*c.n += 1
 	return c.m.DownloadGcode(ctx, name)
 }
+func (c *countingDownloader) DownloadThumbnail(ctx context.Context, name string) (io.ReadCloser, error) {
+	return c.m.DownloadThumbnail(ctx, name)
+}
 func (c *countingDownloader) WatchState(ctx context.Context, fn func(*printer.State)) error {
 	return c.m.WatchState(ctx, fn)
+}
+
+// Заголовок G-кода молчит (как у OrcaSlicer 2.5.1): время — из имени файла,
+// граммы — из length (мм) из WS-списка.
+func TestListFilesFallbacks(t *testing.T) {
+	m := &mockPrinter{
+		files: []printer.RawFile{
+			{Path: "/p", Name: "orcs_3_PLA_2h30m.gcode", Size: 1000, FilamentMM: 3048},
+			{Path: "/p", Name: "Holder.gcode", Size: 2000, FilamentMM: 0},
+		},
+		gcode: map[string][]byte{
+			// В заголовке только плотность — времени и грамм нет.
+			"orcs_3_PLA_2h30m.gcode": []byte("; filament_density: 1.24\n"),
+			"Holder.gcode":           []byte("G28\nG1 X10\n"),
+		},
+	}
+	app := newTestApp(t, m)
+	app.connected = true
+	app.client = m
+
+	meta, err := app.ListFiles(context.Background())
+	if err != nil {
+		t.Fatalf("ListFiles: %v", err)
+	}
+	if meta[0].PrintTime == nil || *meta[0].PrintTime != 2*3600+30*60 {
+		t.Errorf("orcs: PrintTime = %v, want 9000 (из имени)", meta[0].PrintTime)
+	}
+	if meta[0].Filament == nil {
+		t.Fatal("orcs: Filament = nil, want пересчёт из 3048 мм")
+	}
+	// 3048 мм × π·0.875²/1000 × 1.24 ≈ 9.09 г
+	if *meta[0].Filament < 9.0 || *meta[0].Filament > 9.2 {
+		t.Errorf("orcs: Filament = %v, want ≈ 9.09", *meta[0].Filament)
+	}
+	if meta[1].PrintTime != nil || meta[1].Filament != nil {
+		t.Errorf("Holder: ожидалось «—», got PrintTime=%v Filament=%v", meta[1].PrintTime, meta[1].Filament)
+	}
+}
+
+// Заголовок G-кода приоритетнее имени: имя «1h0m0s», в файле 2 часа.
+func TestListFilesHeaderBeatsFilename(t *testing.T) {
+	m := &mockPrinter{
+		files: []printer.RawFile{
+			{Path: "/p", Name: "part_PLA_1h0m0s.gcode", Size: 100, FilamentMM: 1000},
+		},
+		gcode: map[string][]byte{
+			"part_PLA_1h0m0s.gcode": []byte("; estimated printing time (normal mode) = 2h 0m 0s\n"),
+		},
+	}
+	app := newTestApp(t, m)
+	app.connected = true
+	app.client = m
+
+	meta, err := app.ListFiles(context.Background())
+	if err != nil {
+		t.Fatalf("ListFiles: %v", err)
+	}
+	if meta[0].PrintTime == nil || *meta[0].PrintTime != 7200 {
+		t.Errorf("PrintTime = %v, want 7200 (из заголовка, не из имени)", meta[0].PrintTime)
+	}
+}
+
+// Превью: data URI из скачанного PNG; при отсутствии — пустая строка.
+func TestListFilesThumb(t *testing.T) {
+	png := []byte{0x89, 'P', 'N', 'G'}
+	m := &mockPrinter{
+		files: []printer.RawFile{
+			{Path: "/p", Name: "a.gcode", Size: 100},
+			{Path: "/p", Name: "b.gcode", Size: 200},
+		},
+		gcode:  map[string][]byte{"a.gcode": []byte("G28\n"), "b.gcode": []byte("G28\n")},
+		thumbs: map[string][]byte{"a.gcode": png},
+	}
+	app := newTestApp(t, m)
+	app.connected = true
+	app.client = m
+
+	meta, err := app.ListFiles(context.Background())
+	if err != nil {
+		t.Fatalf("ListFiles: %v", err)
+	}
+	if !strings.HasPrefix(meta[0].Thumb, "data:image/png;base64,") {
+		t.Errorf("a: Thumb = %q, want data URI", meta[0].Thumb)
+	}
+	if meta[1].Thumb != "" {
+		t.Errorf("b: Thumb = %q, want «» (нет превью)", meta[1].Thumb)
+	}
 }

@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -26,12 +27,16 @@ type PrinterAPI interface {
 	ListFiles(ctx context.Context) ([]printer.RawFile, error)
 	DeleteFile(ctx context.Context, p, name string) error
 	DownloadGcode(ctx context.Context, name string) (io.ReadCloser, error)
+	DownloadThumbnail(ctx context.Context, name string) (io.ReadCloser, error)
 	WatchState(ctx context.Context, fn func(*printer.State)) error
 }
 
 // gcodeHeadBytes — сколько читать с G-кода: весь заголовок слайсера в
 // первых килобайтах, а принтер Range игнорирует и шлёт весь файл.
 const gcodeHeadBytes = 256 * 1024
+
+// thumbLimit — превью принтера маленькие (96×96/300×300 PNG), 1 МБ с запасом.
+const thumbLimit = 1 << 20
 
 // enrichWorkers — параллелизм скачивания G-кодов при ListFiles.
 const enrichWorkers = 4
@@ -49,6 +54,7 @@ type App struct {
 	state         *printer.State     // последнее смерженное состояние
 	stateCancel   context.CancelFunc // остановка WatchState при Disconnect
 	gcodeCache    map[string]gcode.Info
+	thumbCache    map[string]string // «path|name» → data URI ("" — нет)
 }
 
 // NewApp создаёт App, говорящий с реальным принтером по IP.
@@ -66,6 +72,7 @@ func NewAppWithClient(cfgDir string, factory func(ip string) PrinterAPI) *App {
 		cfg:           cfg,
 		clientFactory: factory,
 		gcodeCache:    map[string]gcode.Info{},
+		thumbCache:    map[string]string{},
 	}
 }
 
@@ -207,31 +214,72 @@ func (a *App) ListFiles(ctx context.Context) ([]printer.FileMeta, error) {
 	return meta, nil
 }
 
-// enrich — FileMeta для одного файла: данные G-кода из кэша или из
-// скачивания (первые gcodeHeadBytes). Ошибка скачивания/парсинга — файл
-// остаётся в списке с nil («—»).
+// enrich — FileMeta для одного файла. Данные и их источники (по убыванию
+// приоритета):
+//   - время: заголовок G-кода → суффикс времени в имени (OrcaSlicer
+//     дописывает оценку: «orcs_3_PLA_2h30m.gcode»);
+//   - граммы: заголовок G-кода → length из WS-списка × плотность
+//     (принтер сам знает длину филамента в каждом файле);
+//   - превью: GET /downloads/humbnail/<base>.png → data URI.
+//
+// Ошибка скачивания/парсинга — файл остаётся в списке с nil («—»).
 func (a *App) enrich(ctx context.Context, client PrinterAPI, rf printer.RawFile) printer.FileMeta {
 	fm := printer.FileMeta{Path: rf.Path, Name: rf.Name, Size: rf.Size}
-	key := rf.Path + "|" + strconv.FormatInt(rf.Size, 10)
+	key := rf.Path + "|" + rf.Name + "|" + strconv.FormatInt(rf.Size, 10)
 
 	a.mu.Lock()
 	info, cached := a.gcodeCache[key]
 	a.mu.Unlock()
 	if !cached {
-		info = gcode.Info{}
-		if rc, err := client.DownloadGcode(ctx, rf.Name); err == nil {
-			if parsed, perr := gcode.Parse(io.LimitReader(rc, gcodeHeadBytes)); perr == nil {
-				info = parsed
-			}
-			rc.Close()
-		}
+		info = gcode.ApplyFallbacks(rf.Name, rf.FilamentMM, downloadHead(ctx, client, rf.Name))
 		a.mu.Lock()
 		a.gcodeCache[key] = info
 		a.mu.Unlock()
 	}
 	fm.PrintTime = info.TimeSeconds
 	fm.Filament = info.FilamentGrams
+	fm.Thumb = a.thumb(ctx, client, rf)
 	return fm
+}
+
+// downloadHead скачивает G-код и возвращает результат парсинга его
+// заголовка (nil — не удалось/не нашлось). Принтер Range игнорирует,
+// поэтому читаем только gcodeHeadBytes.
+func downloadHead(ctx context.Context, client PrinterAPI, name string) gcode.Info {
+	rc, err := client.DownloadGcode(ctx, name)
+	if err != nil {
+		return gcode.Info{}
+	}
+	defer rc.Close()
+	parsed, perr := gcode.Parse(io.LimitReader(rc, gcodeHeadBytes))
+	if perr != nil {
+		return gcode.Info{}
+	}
+	return parsed
+}
+
+// thumb — data URI превью файла из кэша или скачивания. Ошибка/отсутствие
+// превью — пустая строка (UI показывает заглушку).
+func (a *App) thumb(ctx context.Context, client PrinterAPI, rf printer.RawFile) string {
+	key := rf.Path + "|" + rf.Name
+	a.mu.Lock()
+	v, ok := a.thumbCache[key]
+	a.mu.Unlock()
+	if ok {
+		return v
+	}
+	v = ""
+	if rc, err := client.DownloadThumbnail(ctx, rf.Name); err == nil {
+		b, rerr := io.ReadAll(io.LimitReader(rc, thumbLimit))
+		rc.Close()
+		if rerr == nil {
+			v = "data:image/png;base64," + base64.StdEncoding.EncodeToString(b)
+		}
+	}
+	a.mu.Lock()
+	a.thumbCache[key] = v
+	a.mu.Unlock()
+	return v
 }
 
 // DeleteFiles удаляет файлы последовательно. paths — полные пути

@@ -28,6 +28,7 @@ type FileMeta struct {
 	Size      int64    // байты
 	PrintTime *int     // секунды
 	Filament  *float64 // граммы
+	Thumb     string   // превью, data URI ("" — нет/ошибка)
 }
 
 // Storage — ёмкость внутренней памяти (eMMC). Total может быть оценкой

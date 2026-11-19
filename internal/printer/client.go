@@ -207,15 +207,16 @@ func (c *Client) DeleteFile(ctx context.Context, path, name string) error {
 }
 
 // DownloadGcode — GET /downloads/gcode/<name> (стриминг, весь файл).
+// Имя экранируется: в названиях бывают пробелы и кириллица.
 func (c *Client) DownloadGcode(ctx context.Context, name string) (io.ReadCloser, error) {
-	return c.download(ctx, "/downloads/gcode/"+name)
+	return c.download(ctx, "/downloads/gcode/"+url.PathEscape(name))
 }
 
 // DownloadThumbnail — GET /downloads/humbnail/<base>.png (принтер называет
 // превью по имени без суффикса .gcode: orcs_PLA.gcode → orcs_PLA.png).
 func (c *Client) DownloadThumbnail(ctx context.Context, name string) (io.ReadCloser, error) {
 	base := strings.TrimSuffix(name, ".gcode")
-	return c.download(ctx, "/downloads/humbnail/"+base+".png")
+	return c.download(ctx, "/downloads/humbnail/"+url.PathEscape(base)+".png")
 }
 
 func (c *Client) download(ctx context.Context, path string) (io.ReadCloser, error) {

@@ -15,13 +15,15 @@ import (
 type Info struct {
 	TimeSeconds   *int
 	FilamentGrams *float64
+	Density       *float64 // из «; filament_density: …» (г/см³)
 }
 
 // Параметры пересчёта «мм филамента → граммы» (фолбэк, когда слайсер не
 // указал [g]).
 const (
-	filamentDiameterMM = 1.75
-	defaultDensity     = 1.24 // PLA, г/см³
+	FilamentDiameterMM = 1.75
+	// DefaultDensity — PLA, г/см³.
+	DefaultDensity = 1.24
 )
 
 var (
@@ -81,6 +83,7 @@ func Parse(r io.Reader) (Info, error) {
 			if f, ok := parseFloat(reDensity, line); ok {
 				density = f
 				densityFound = true
+				info.Density = &f
 			}
 		}
 		// Всё нужное в заголовке собрано — не гоняем регулярки по телу.
@@ -94,13 +97,19 @@ func Parse(r io.Reader) (Info, error) {
 	// Фолбэк: грамм нет, но есть длина филамента → пересчёт по плотности.
 	if info.FilamentGrams == nil && mmFound {
 		if !densityFound {
-			density = defaultDensity
+			density = DefaultDensity
 		}
-		volumeCC := mm * math.Pi * (filamentDiameterMM / 2) * (filamentDiameterMM / 2) / 1000.0
-		g := volumeCC * density
+		g := MMToGrams(mm, density)
 		info.FilamentGrams = &g
 	}
 	return info, nil
+}
+
+// MMToGrams пересчитывает длину филамента в граммы:
+// V = L · π·(d/2)² (мм³) → см³ → · плотность.
+func MMToGrams(mmMM, density float64) float64 {
+	r := FilamentDiameterMM / 2
+	return mmMM * math.Pi * r * r / 1000.0 * density
 }
 
 func matchTime(re *regexp.Regexp, line string) (int, bool) {

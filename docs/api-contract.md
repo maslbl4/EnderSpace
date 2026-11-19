@@ -11,7 +11,7 @@
 |---|---|---|
 | GET | `/info` | `{"mac":"FCEE110432F7","model":"F005"}` (200, application/json) |
 | GET | `/downloads/gcode/<name>` | тело G-кода (200, application/octet-stream, `Content-Length` = `size` из списка). **Range-заголовок игнорируется** — всегда отдаётся весь файл. ВНИМАНИЕ: в начале файла — multipart-обёртка сервера (см. ниже) |
-| GET | `/downloads/humbnail/<name>.png` | PNG 96×96 (200, image/png) |
+| GET | `/downloads/humbnail/<base>.png` | PNG-превью (200, image/png); `<base>` — имя файла без `.gcode` (URL-экранировать: пробелы, кириллица) |
 | POST | `/upload/<name>` | multipart, поле `file`; ответ `{"code":200}` (используется UI принтера; в EnderSpace не нужно) |
 
 ### Multipart-обёртка в скачиваемом G-коде
@@ -59,8 +59,21 @@ Content-Type: application/octet-stream
 | 5 | length | `3048` | длина филамента, мм |
 | 6 | thumbnail | `\/tmp\/creality\/local_gcode\/humbnail\/orcs_3_PLA_2h30m.png` | путь к превью |
 
-Время печати и граммы в списке **не приходят** — берутся из заголовка G-кода
-(см. `internal/gcode`), либо граммы считаются из `length` × плотности.
+Время печати и граммы в списке **не приходят**. Источники (по приоритету):
+
+1. Заголовок G-кода (см. `internal/gcode`): `; estimated printing time …`,
+   `; total filament used [g]`, `; filament used [mm]`.
+2. **Имя файла**: OrcaSlicer/Bambu дописывают оценку времени в название —
+   `orcs_3_PLA_2h30m.gcode` → 2ч 30м (`gcode.TimeFromName`).
+3. **Поле `length` из этого списка**: принтер знает длину филамента в каждом
+   файле — граммы = `length` × π·(1.75/2)²/1000 × плотность (заголовок или
+   1.24 по умолчанию).
+
+> Проверено на реальном принтере 2026-11-19: G-коды OrcaSlicer 2.5.1 **вообще
+> не содержат** маркеров времени/грамм (весь файл 10 МБ просмотрен), зато имя
+> и `length` дают оба значения. Заголовок содержит только `filament_density`,
+   `filament_diameter`, `max_z_height`, `total layer number` + **два** блока
+   превью (96×96 и 300×300, ≈55 КБ base64).
 
 ### Операции над файлами
 
