@@ -20,15 +20,25 @@ import (
 // wsPort — порт кастомного WebSocket-сервера Creality.
 const wsPort = "9999"
 
+// ErrNotFound — принтер ответил 404: ресурса точно нет (отличается от
+// сетевого сбоя, который стоит ретраить).
+var ErrNotFound = errors.New("http 404: resource not found")
+
 // readTimeout — лимит ожидания одного WS-ответа (список файлов).
 const readTimeout = 5 * time.Second
 
+// downloadTimeout — лимит на докачку G-кода/превью. eMMC-принтер медленный,
+// особенно под параллельной нагрузкой и во время печати: 5 с (общий таймаут
+// /info) здесь убивает даже ретраи.
+const downloadTimeout = 60 * time.Second
+
 // Client — гибридный HTTP+WS клиент одного принтера.
 type Client struct {
-	base   string       // http://<ip>
-	wsURL  string       // ws://<ip>:9999
-	http   *http.Client // для /info (с жёстким таймаутом)
-	dialer *websocket.Dialer
+	base      string       // http://<ip>
+	wsURL     string       // ws://<ip>:9999
+	http      *http.Client // для /info (жёсткий таймаут — «принтер жив?»)
+	downloads *http.Client // для /downloads/* (длинный таймаут — медленный eMMC)
+	dialer    *websocket.Dialer
 }
 
 // New создаёт клиент по базовому HTTP-адресу принтера (http://<ip>).
@@ -36,10 +46,11 @@ type Client struct {
 func New(base string) *Client {
 	host := hostOnly(base)
 	return &Client{
-		base:   strings.TrimRight(base, "/"),
-		wsURL:  "ws://" + host + ":" + wsPort,
-		http:   &http.Client{Timeout: 5 * time.Second},
-		dialer: &websocket.Dialer{HandshakeTimeout: 5 * time.Second},
+		base:      strings.TrimRight(base, "/"),
+		wsURL:     "ws://" + host + ":" + wsPort,
+		http:      &http.Client{Timeout: 5 * time.Second},
+		downloads: &http.Client{Timeout: downloadTimeout},
+		dialer:    &websocket.Dialer{HandshakeTimeout: 5 * time.Second},
 	}
 }
 
@@ -224,12 +235,15 @@ func (c *Client) download(ctx context.Context, path string) (io.ReadCloser, erro
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.downloads.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("GET %s: %w", path, ErrNotFound)
+		}
 		return nil, fmt.Errorf("GET %s: HTTP %d", path, resp.StatusCode)
 	}
 	return resp.Body, nil

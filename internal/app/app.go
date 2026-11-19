@@ -60,6 +60,10 @@ const thumbLimit = 1 << 20
 // enrichWorkers — параллелизм скачивания G-кодов при фоновом обогащении.
 const enrichWorkers = 8
 
+// retryDelays — паузы перед ретраями докачки (3 ретрая → 4 попытки).
+// var, а не const: тесты подменяют на миллисекунды.
+var retryDelays = []time.Duration{500 * time.Millisecond, time.Second, 2 * time.Second}
+
 // App — состояние подключения к одному принтеру + операции над его памятью.
 type App struct {
 	mu            sync.Mutex
@@ -338,7 +342,9 @@ func (a *App) emit(name string, data any) {
 //     (принтер сам знает длину филамента в каждом файле);
 //   - превью: GET /downloads/humbnail/<base>.png → data URI.
 //
-// Ошибка скачивания/парсинга — файл остаётся в списке с nil («—»).
+// Ошибка скачивания (после всех ретраев) — файл остаётся в списке
+// с фолбэками (время из имени, граммы из length) или «—», но в кэш НЕ
+// уходит: следующий проход (⟳) повторит докачку.
 // gcodeCacheKey — ключ gcode-кэша: при изменении размера файла данные
 // из заголовка устарели.
 func gcodeCacheKey(rf printer.RawFile) string {
@@ -353,10 +359,17 @@ func (a *App) enrich(ctx context.Context, client PrinterAPI, rf printer.RawFile)
 	info, cached := a.gcodeCache[key]
 	a.mu.Unlock()
 	if !cached {
-		info = gcode.ApplyFallbacks(rf.Name, rf.FilamentMM, downloadHead(ctx, client, rf.Name))
-		a.mu.Lock()
-		a.gcodeCache[key] = info
-		a.mu.Unlock()
+		var ok bool
+		info, ok = a.downloadHeadWithRetries(ctx, client, rf.Name)
+		// Фолбэки (время из имени, граммы из length) применяем всегда —
+		// они работают и при провале докачки. В кэш уходит только
+		// успешно скачанный заголовок.
+		info = gcode.ApplyFallbacks(rf.Name, rf.FilamentMM, info)
+		if ok {
+			a.mu.Lock()
+			a.gcodeCache[key] = info
+			a.mu.Unlock()
+		}
 	}
 	fm.PrintTime = info.TimeSeconds
 	fm.Filament = info.FilamentGrams
@@ -364,25 +377,70 @@ func (a *App) enrich(ctx context.Context, client PrinterAPI, rf printer.RawFile)
 	return fm
 }
 
+// withRetries — до 4 попыток (1 + 3 ретрая) с паузами retryDelays между
+// ними. fn возвращает nil, если попытка удалась. retriable решает, стоит
+// ли повторять конкретную ошибку (например, 404 — окончательный ответ).
+// Возвращает ошибку последней попытки; nil — успех. Отмена фазы — стоп сразу.
+func withRetries(ctx context.Context, retriable func(error) bool, fn func(ctx context.Context) error) error {
+	var lastErr error
+	for attempt := 0; ; attempt++ {
+		lastErr = fn(ctx)
+		if lastErr == nil {
+			return nil
+		}
+		if ctx.Err() != nil || !retriable(lastErr) || attempt >= len(retryDelays) {
+			return lastErr
+		}
+		select {
+		case <-ctx.Done():
+			return lastErr
+		case <-time.After(retryDelays[attempt]):
+		}
+	}
+}
+
+// anyError — любая ошибка ретраится (сетевые сбои, таймауты).
+func anyError(error) bool { return true }
+
+// downloadHeadWithRetries — скачивание заголовка G-кода с ретраями.
+// ok=false — все попытки провалились (или фаза отменена).
+func (a *App) downloadHeadWithRetries(ctx context.Context, client PrinterAPI, name string) (gcode.Info, bool) {
+	var (
+		info gcode.Info
+		ok   bool
+	)
+	err := withRetries(ctx, anyError, func(ctx context.Context) error {
+		info, ok = downloadHead(ctx, client, name)
+		if !ok {
+			return errors.New("докачка заголовка не удалась")
+		}
+		return nil
+	})
+	return info, err == nil
+}
+
 // downloadHead скачивает G-код и возвращает результат парсинга его
-// заголовка (nil — не удалось/не нашлось). Принтер Range игнорирует,
-// поэтому читаем только gcodeHeadBytes.
-func downloadHead(ctx context.Context, client PrinterAPI, name string) gcode.Info {
+// заголовка. ok=false — скачивание/парсинг не удалось. Принтер Range
+// игнорирует, поэтому читаем только gcodeHeadBytes.
+func downloadHead(ctx context.Context, client PrinterAPI, name string) (gcode.Info, bool) {
 	rc, err := client.DownloadGcode(ctx, name)
 	if err != nil {
-		return gcode.Info{}
+		return gcode.Info{}, false
 	}
 	defer rc.Close()
 	parsed, perr := gcode.Parse(io.LimitReader(rc, gcodeHeadBytes))
 	if perr != nil {
-		return gcode.Info{}
+		return gcode.Info{}, false
 	}
-	return parsed
+	return parsed, true
 }
 
 // thumb — data URI превью файла. Источники: вложенный в G-код PNG
 // (300×300, качество слайсера) → GET /downloads/humbnail (96×96).
-// Ошибка/отсутствие — пустая строка (UI показывает заглушку).
+// Правила кэша:
+//   - успех (и 404 — «превью точно нет») — кэшируется, включая "";
+//   - сетевой провал (после 4 попыток) — в кэш НЕ уходит: следующий
+//     проход (⟳) попробует снова.
 func (a *App) thumb(ctx context.Context, client PrinterAPI, rf printer.RawFile, info gcode.Info) string {
 	key := rf.Path + "|" + rf.Name
 	a.mu.Lock()
@@ -391,14 +449,30 @@ func (a *App) thumb(ctx context.Context, client PrinterAPI, rf printer.RawFile, 
 	if ok {
 		return v
 	}
-	v = ""
 	if len(info.Thumb) > 0 {
 		v = "data:image/png;base64," + base64.StdEncoding.EncodeToString(info.Thumb)
-	} else if rc, err := client.DownloadThumbnail(ctx, rf.Name); err == nil {
-		b, rerr := io.ReadAll(io.LimitReader(rc, thumbLimit))
-		rc.Close()
-		if rerr == nil {
-			v = "data:image/png;base64," + base64.StdEncoding.EncodeToString(b)
+	} else {
+		var png []byte
+		err := withRetries(ctx,
+			// 404 — окончательный ответ «превью нет», ретраить нечего.
+			func(err error) bool { return !errors.Is(err, printer.ErrNotFound) },
+			func(ctx context.Context) error {
+				rc, err := client.DownloadThumbnail(ctx, rf.Name)
+				if err != nil {
+					return err
+				}
+				defer rc.Close()
+				b, rerr := io.ReadAll(io.LimitReader(rc, thumbLimit))
+				if rerr != nil {
+					return rerr
+				}
+				png = b
+				return nil
+			})
+		if err == nil {
+			v = "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
+		} else if !errors.Is(err, printer.ErrNotFound) {
+			return "" // сетевой провал: без кэша, следующий проход повторит
 		}
 	}
 	a.mu.Lock()

@@ -22,6 +22,8 @@ type mockPrinter struct {
 	gcode       map[string][]byte // name → тело G-кода
 	thumbs      map[string][]byte // name → PNG превью
 	downloadErr map[string]error  // name → ошибка скачивания
+	flaky       map[string]int    // name → остаток гарантированных сбоев (G-код)
+	thumbFlaky  map[string]int    // name → остаток гарантированных сбоев (превью)
 	deleteErr   map[string]error  // "path/name" → ошибка удаления
 	deleted     []string
 }
@@ -54,6 +56,10 @@ func (m *mockPrinter) DownloadGcode(ctx context.Context, name string) (io.ReadCl
 	if err := m.downloadErr[name]; err != nil {
 		return nil, err
 	}
+	if n := m.flaky[name]; n > 0 {
+		m.flaky[name]--
+		return nil, errors.New("mock: транзиентный сбой")
+	}
 	body, ok := m.gcode[name]
 	if !ok {
 		return nil, errors.New("mock: файл не найден")
@@ -64,9 +70,14 @@ func (m *mockPrinter) DownloadGcode(ctx context.Context, name string) (io.ReadCl
 func (m *mockPrinter) DownloadThumbnail(ctx context.Context, name string) (io.ReadCloser, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if n := m.thumbFlaky[name]; n > 0 {
+		m.thumbFlaky[name]--
+		return nil, errors.New("mock: транзиентный сбой превью")
+	}
 	body, ok := m.thumbs[name]
 	if !ok {
-		return nil, errors.New("mock: превью не найдено")
+		// «Превью точно нет» — окончательный 404, не сетевой сбой.
+		return nil, printer.ErrNotFound
 	}
 	return io.NopCloser(bytes.NewReader(body)), nil
 }
@@ -119,6 +130,24 @@ func (r *eventRecorder) waitForDone(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("files:done не пришёл за 10 с")
 	}
+}
+
+// reset — готовит коллектор к следующему проходу (⟳).
+func (r *eventRecorder) reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.enriched = nil
+	r.progress = nil
+	r.done = make(chan struct{})
+}
+
+// fastRetries — ретрай-паузы на миллисекунды (иначе тесты ждут 3.5 с на
+// каждый провалившийся файл).
+func fastRetries(t *testing.T) {
+	t.Helper()
+	old := retryDelays
+	retryDelays = []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond}
+	t.Cleanup(func() { retryDelays = old })
 }
 
 // enrichedByName — данные файла из события files:enriched.
@@ -189,6 +218,7 @@ func TestListFilesMergesGcodeInfo(t *testing.T) {
 }
 
 func TestListFilesParserFailureKeepsFile(t *testing.T) {
+	fastRetries(t)
 	m := &mockPrinter{
 		files: []printer.RawFile{
 			{Path: "/p", Name: "a.gcode", Size: 100},
@@ -379,10 +409,11 @@ func TestListFilesCachesGcodeInfo(t *testing.T) {
 	}
 }
 
-// countingDownloader — считает обращения DownloadGcode.
+// countingDownloader — считает обращения DownloadGcode/DownloadThumbnail.
 type countingDownloader struct {
-	m *mockPrinter
-	n *int
+	m      *mockPrinter
+	n      *int // DownloadGcode; nil — не считаем
+	nThumb *int // DownloadThumbnail; nil — не считаем
 }
 
 func (c *countingDownloader) Info(ctx context.Context) (printer.Info, error) {
@@ -395,10 +426,15 @@ func (c *countingDownloader) DeleteFile(ctx context.Context, path, name string) 
 	return c.m.DeleteFile(ctx, path, name)
 }
 func (c *countingDownloader) DownloadGcode(ctx context.Context, name string) (io.ReadCloser, error) {
-	*c.n += 1
+	if c.n != nil {
+		*c.n += 1
+	}
 	return c.m.DownloadGcode(ctx, name)
 }
 func (c *countingDownloader) DownloadThumbnail(ctx context.Context, name string) (io.ReadCloser, error) {
+	if c.nThumb != nil {
+		*c.nThumb += 1
+	}
 	return c.m.DownloadThumbnail(ctx, name)
 }
 func (c *countingDownloader) WatchState(ctx context.Context, fn func(*printer.State)) error {
@@ -542,5 +578,154 @@ func TestListFilesThumb(t *testing.T) {
 	b := rec.enrichedByName(t, "b.gcode")
 	if b.Thumb != "" {
 		t.Errorf("b: Thumb = %q, want «» (нет превью)", b.Thumb)
+	}
+}
+
+// Транзиентный сбой: 2 первых попытки упали, третья успешна — ретраи
+// сработали, данные на месте.
+func TestEnrichRetriesTransientFailure(t *testing.T) {
+	fastRetries(t)
+	downloads := 0
+	m := &mockPrinter{
+		files: []printer.RawFile{{Path: "/p", Name: "a.gcode", Size: 100}},
+		gcode: map[string][]byte{"a.gcode": []byte("; total filament used [g] = 7\n")},
+		flaky: map[string]int{"a.gcode": 2},
+	}
+	rec := newEventRecorder()
+	app := NewAppWithClientAndSink(t.TempDir(), func(ip string) PrinterAPI { return m }, rec.sink)
+	app.connected = true
+	app.client = &countingDownloader{m: m, n: &downloads}
+	t.Cleanup(func() { _ = app.Disconnect() })
+
+	if _, err := app.ListFiles(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	rec.waitForDone(t)
+	fm := rec.enrichedByName(t, "a.gcode")
+	if fm.Filament == nil || *fm.Filament != 7 {
+		t.Errorf("Filament = %v, want 7 (третья попытка успешна)", fm.Filament)
+	}
+	if downloads != 3 {
+		t.Errorf("скачиваний = %d, want 3 (2 сбоя + успех)", downloads)
+	}
+}
+
+// Провал не кэшируется: следующий проход (⟳) запрашивает файл снова и
+// получает данные, когда принтер «выздоровел».
+func TestFailureNotCachedRetriesNextPass(t *testing.T) {
+	fastRetries(t)
+	downloads := 0
+	m := &mockPrinter{
+		files: []printer.RawFile{{Path: "/p", Name: "a.gcode", Size: 100}},
+		gcode: map[string][]byte{"a.gcode": []byte("; total filament used [g] = 7\n")},
+		flaky: map[string]int{"a.gcode": 100}, // «всегда» падают
+	}
+	rec := newEventRecorder()
+	app := NewAppWithClientAndSink(t.TempDir(), func(ip string) PrinterAPI { return m }, rec.sink)
+	app.connected = true
+	app.client = &countingDownloader{m: m, n: &downloads}
+	t.Cleanup(func() { _ = app.Disconnect() })
+
+	if _, err := app.ListFiles(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	rec.waitForDone(t)
+	first := downloads
+	if first != 4 {
+		t.Fatalf("скачиваний после первого прохода = %d, want 4 (1 + 3 ретрая)", first)
+	}
+	// Принтер «выздоровел»: сбои убраны.
+	m.mu.Lock()
+	m.flaky = map[string]int{}
+	m.mu.Unlock()
+
+	rec.reset()
+	if _, err := app.ListFiles(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	rec.waitForDone(t)
+	fm := rec.enrichedByName(t, "a.gcode")
+	if fm.Filament == nil || *fm.Filament != 7 {
+		t.Errorf("Filament = %v, want 7 (повтор после провала успешен)", fm.Filament)
+	}
+	if downloads != first+1 {
+		t.Errorf("скачиваний = %d, want %d (провал не закэширован)", downloads, first+1)
+	}
+}
+
+// Сетевой провал превью не кэшируется: следующий проход (⟳) запрашивает
+// снова и получает data URI, когда принтер «выздоровел».
+func TestThumbFailureNotCached(t *testing.T) {
+	fastRetries(t)
+	png := []byte{0x89, 'P', 'N', 'G'}
+	m := &mockPrinter{
+		files:      []printer.RawFile{{Path: "/p", Name: "a.gcode", Size: 100}},
+		gcode:      map[string][]byte{"a.gcode": []byte("G28\n")},
+		thumbFlaky: map[string]int{"a.gcode": 100}, // «всегда» падают
+	}
+	rec := newEventRecorder()
+	app := NewAppWithClientAndSink(t.TempDir(), func(ip string) PrinterAPI { return m }, rec.sink)
+	app.connected = true
+	app.client = m
+	t.Cleanup(func() { _ = app.Disconnect() })
+
+	if _, err := app.ListFiles(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	rec.waitForDone(t)
+	if fm := rec.enrichedByName(t, "a.gcode"); fm.Thumb != "" {
+		t.Fatalf("первый проход: Thumb = %q, want «» (превью не скачано)", fm.Thumb)
+	}
+	// Принтер «выздоровел»: сбои убраны, превью появилось.
+	m.mu.Lock()
+	m.thumbFlaky = map[string]int{}
+	m.thumbs = map[string][]byte{"a.gcode": png}
+	m.mu.Unlock()
+
+	rec.reset()
+	if _, err := app.ListFiles(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	rec.waitForDone(t)
+	fm := rec.enrichedByName(t, "a.gcode")
+	if !strings.HasPrefix(fm.Thumb, "data:image/png;base64,") {
+		t.Errorf("второй проход: Thumb = %q, want data URI (провал не закэширован)", fm.Thumb)
+	}
+}
+
+// 404 превью — окончательный ответ: не ретраится (одна попытка) и кэшируется
+// — следующий проход превью не запрашивает.
+func TestThumbNotFoundIsFinal(t *testing.T) {
+	fastRetries(t)
+	png := []byte{0x89, 'P', 'N', 'G'}
+	m := &mockPrinter{
+		files: []printer.RawFile{{Path: "/p", Name: "a.gcode", Size: 100}},
+		gcode: map[string][]byte{"a.gcode": []byte("G28\n")},
+	}
+	cdn := &countingDownloader{m: m, nThumb: new(int)}
+	rec := newEventRecorder()
+	app := NewAppWithClientAndSink(t.TempDir(), func(ip string) PrinterAPI { return m }, rec.sink)
+	app.connected = true
+	app.client = cdn
+	t.Cleanup(func() { _ = app.Disconnect() })
+
+	if _, err := app.ListFiles(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	rec.waitForDone(t)
+	if *cdn.nThumb != 1 {
+		t.Errorf("попыток превью = %d, want 1 (404 не ретраится)", *cdn.nThumb)
+	}
+	// «Превью появилось» — но 404 закэширован: повторных запросов нет.
+	m.mu.Lock()
+	m.thumbs = map[string][]byte{"a.gcode": png}
+	m.mu.Unlock()
+	rec.reset()
+	if _, err := app.ListFiles(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	rec.waitForDone(t)
+	if *cdn.nThumb != 1 {
+		t.Errorf("попыток превью = %d, want 1 (404 закэширован)", *cdn.nThumb)
 	}
 }
