@@ -399,6 +399,20 @@ body {
     border: 1px dashed var(--glass-border);
     background: rgba(255, 255, 255, 0.02);
 }
+/* Зум превью: плавит над таблицей в центре наведённой миниатюры.
+   fixed — не обрезается скролл-контейнером таблицы. */
+.zoom-thumb {
+    position: fixed;
+    width: 280px;
+    height: 280px;
+    object-fit: cover;
+    transform: translate(-50%, -50%);
+    border-radius: 14px;
+    border: 1px solid var(--glass-border);
+    box-shadow: 0 14px 44px rgba(0, 0, 0, 0.55);
+    background: rgba(13, 17, 28, 0.92);
+    z-index: 1000;
+}
 .files-table .name {
     max-width: 320px;
     overflow: hidden;

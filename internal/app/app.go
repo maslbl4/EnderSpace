@@ -81,7 +81,8 @@ func NewAppWithClient(cfgDir string, factory func(ip string) PrinterAPI) *App {
 func (a *App) Connect(ctx context.Context, ip string) error {
 	ip = normalizeIP(ip)
 	client := a.clientFactory(ip)
-	if _, err := client.Info(ctx); err != nil {
+	info, err := client.Info(ctx)
+	if err != nil {
 		return fmt.Errorf("подключение к %s: %w", ip, err)
 	}
 
@@ -89,7 +90,7 @@ func (a *App) Connect(ctx context.Context, ip string) error {
 	a.disconnectLocked()
 	a.client = client
 	a.ip = ip
-	a.model = ""
+	a.model = info.Model // например "F005" → UI покажет "Ender-3 V3 KE"
 	a.connected = true
 	a.state = printer.NewState()
 	watchCtx, cancel := context.WithCancel(context.Background())

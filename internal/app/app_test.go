@@ -202,6 +202,9 @@ func TestConnectPersistsIP(t *testing.T) {
 	if !st.Connected || st.IP != "192.168.3.166" {
 		t.Errorf("Status() = %+v, want Connected, IP=192.168.3.166", st)
 	}
+	if st.Model != "F005" {
+		t.Errorf("Status().Model = %q, want F005 (из /info)", st.Model)
+	}
 }
 
 func TestConnectFailsWhenPrinterUnreachable(t *testing.T) {

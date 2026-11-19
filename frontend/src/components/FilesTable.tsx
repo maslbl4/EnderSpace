@@ -1,12 +1,16 @@
 // Таблица файлов: превью / имя / размер / время / пластик.
-// «—» — значение не найдено; сортировка по имени и размеру;
-// скелетон во время загрузки. Чекбоксы — функционал Task 9.
+// «—» — значение не найдено (всегда в конце сортировки); сортировка по
+// всем колонкам; скелетон во время загрузки; зум превью при наведении.
+// Чекбоксы — функционал Task 9.
 import { useMemo, useState } from 'react';
 import { t } from '../i18n';
 import type { FileMeta } from '../lib/api';
 import { formatBytes, formatDuration, formatGrams } from '../lib/format';
 
-type SortKey = 'name' | 'size';
+type SortKey = 'name' | 'size' | 'time' | 'plastic';
+
+// zoom — увеличенное превью: позиция = центр наведённой миниатюры.
+type Zoom = { src: string; x: number; y: number };
 
 export default function FilesTable({
   files,
@@ -17,13 +21,24 @@ export default function FilesTable({
 }) {
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [sortAsc, setSortAsc] = useState(true);
+  const [zoom, setZoom] = useState<Zoom | null>(null);
 
   const sorted = useMemo(() => {
     const arr = [...files];
     arr.sort((a, b) => {
-      const r =
-        sortKey === 'name' ? a.Name.localeCompare(b.Name, 'ru') : a.Size - b.Size;
-      return sortAsc ? r : -r;
+      if (sortKey === 'name') {
+        const r = a.Name.localeCompare(b.Name, 'ru');
+        return sortAsc ? r : -r;
+      }
+      const va =
+        sortKey === 'size' ? a.Size : sortKey === 'time' ? a.PrintTime : a.Filament;
+      const vb =
+        sortKey === 'size' ? b.Size : sortKey === 'time' ? b.PrintTime : b.Filament;
+      // «—» (null) — всегда внизу, независимо от направления.
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      return sortAsc ? va - vb : vb - va;
     });
     return arr;
   }, [files, sortKey, sortAsc]);
@@ -40,7 +55,15 @@ export default function FilesTable({
   const arrow = (key: SortKey) =>
     sortKey === key ? (sortAsc ? ' ↑' : ' ↓') : '';
 
+  const showZoom = (src: string, e: React.MouseEvent<HTMLImageElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    setZoom({ src, x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  };
+
+  // Зум-элемент вне <section>: .card использует backdrop-filter, что делает
+  // её containing block для position: fixed (координаты бы «поехали»).
   return (
+    <>
     <section className="card files-card">
       <h2 className="card-title">
         {t('filesTitle')}
@@ -69,8 +92,14 @@ export default function FilesTable({
                   {t('colSize')}
                   {arrow('size')}
                 </th>
-                <th className="num">{t('colTime')}</th>
-                <th className="num">{t('colPlastic')}</th>
+                <th className="sortable num" onClick={() => toggleSort('time')}>
+                  {t('colTime')}
+                  {arrow('time')}
+                </th>
+                <th className="sortable num" onClick={() => toggleSort('plastic')}>
+                  {t('colPlastic')}
+                  {arrow('plastic')}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -85,6 +114,7 @@ export default function FilesTable({
                         alt=""
                         loading="lazy"
                         decoding="async"
+                        onMouseEnter={(e) => showZoom(f.Thumb, e)}
                       />
                     ) : (
                       <span className="thumb thumb-none" aria-hidden />
@@ -107,5 +137,15 @@ export default function FilesTable({
         </div>
       )}
     </section>
+    {zoom ? (
+      <img
+        className="zoom-thumb"
+        src={zoom.src}
+        alt=""
+        style={{ left: zoom.x, top: zoom.y }}
+        onMouseLeave={() => setZoom(null)}
+      />
+    ) : null}
+    </>
   );
 }
