@@ -4,6 +4,26 @@
 
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 ![Wails](https://img.shields.io/badge/Wails-v3-purple)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+---
+
+## About (English)
+
+A desktop app (Go + WebView via [Wails v3](https://v3.wails.io)) for managing the internal
+storage of a Creality Ender-3 V3 KE printer:
+
+- Internal storage: used / free / total (8 GB eMMC, shared with firmware — values are estimates)
+- G-code file list: name, size, print time, filament in grams (parsed from the G-code header,
+  with fallbacks), high-quality previews
+- Batch file deletion with a confirmation dialog and a partial-failure report
+- Russian / English interface (toggle in the header, choice is remembered)
+
+The app talks to the printer's own HTTP :80 + WebSocket :9999 protocol
+(documented in [`docs/api-contract.md`](docs/api-contract.md)) — no Moonraker,
+no extra servers, a single self-contained Windows binary.
+
+Building, debugging and configuration docs are below (in Russian).
 
 ---
 
@@ -39,6 +59,9 @@
 **Удаление**
 - Массовое, последовательное, с отчётом о частичном успехе
 - Блокируется, пока принтер печатает
+
+**Язык**
+- Русский / английский, переключается кнопкой в шапке (выбор запоминается)
 
 ---
 
@@ -171,7 +194,7 @@ docs/api-contract.md     контракт протокола (исследова
 | Бэкенд | Go 1.26 |
 | WS-клиент | [gorilla/websocket](https://github.com/gorilla/websocket) |
 | UI | React 18 + TypeScript + Vite |
-| Локализация | `frontend/src/i18n/ru.ts` + `t(key)` |
+| Локализация | `frontend/src/i18n/` (ru + en), `t(key)`, переключатель RU/EN в шапке |
 
 ---
 
@@ -180,6 +203,6 @@ docs/api-contract.md     контракт протокола (исследова
 Pull requests приветствуются. Правила, которые легко нарушить:
 
 1. **После изменения методов `App`** — `wails3 generate bindings` (файлы `frontend/bindings/` не править руками).
-2. **Все строки UI** — через `i18n/ru.ts` (`t(key)`), без хардкода.
+2. **Все строки UI** — через `i18n/` (`t(key)`; новые ключи добавлять в `ru.ts` и `en.ts`), без хардкода.
 3. **Бэкенд без Wails**: сервисная логика живёт в `internal/` и тестируется без приложения; `main.go` остаётся тонким.
 4. Перед коммитом: `gofmt`, `go vet ./internal/...`, `go test ./internal/... -count=1`.

@@ -6,11 +6,12 @@ import ConnectionScreen from './components/ConnectionScreen';
 import ConfirmDialog from './components/ConfirmDialog';
 import FilesTable, { fileKey } from './components/FilesTable';
 import StorageCard from './components/StorageCard';
-import { t } from './i18n';
+import { plural, t, useI18n } from './i18n';
 import { api } from './lib/api';
 import type { FileMeta, PrinterStatus, Storage } from './lib/api';
-import { formatBytes, plural } from './lib/format';
+import { formatBytes } from './lib/format';
 import { modelName } from './lib/model';
+import LangToggle from './components/LangToggle';
 
 function App() {
   const [connected, setConnected] = useState(false);
@@ -22,6 +23,7 @@ function App() {
 }
 
 function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
+  useI18n(); // перерисовка при смене языка
   const [status, setStatus] = useState<PrinterStatus | null>(null);
   const [storage, setStorage] = useState<Storage | null>(null);
   const [files, setFiles] = useState<FileMeta[] | null>(null);
@@ -170,6 +172,7 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
           </span>
         </div>
         <div className="head-actions">
+          <LangToggle />
           <button
             className="icon-btn"
             title={t('refresh')}
@@ -214,7 +217,7 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
         <div className="footer-bar">
           <span className="footer-info">
             {t('selected')}: {selectedList.length}{' '}
-            {plural(selectedList.length, ['файл', 'файла', 'файлов'])}
+            {plural(selectedList.length, [t('fileOne'), t('fileFew'), t('fileMany')])}
             {selectedList.length > 0 ? ` · ${formatBytes(selectedBytes)}` : ''}
           </span>
           <button

@@ -1,11 +1,30 @@
 # EnderSpace
 
-Менеджер внутренней памяти Creality Ender-3 V3 KE. План: `C:\Users\60230352\.opencode\plan\plan.md`.
+Менеджер внутренней памяти Creality Ender-3 V3 KE (Go + Wails v3 + React/TS).
+Протокол принтера: [`docs/api-contract.md`](docs/api-contract.md) (HTTP :80 + WS :9999, не Moonraker).
 
-## Принтер (тестовый)
+## Сборка и тесты (Windows, нативно)
 
-- IP: **192.168.3.166**
-- Модель по `GET /info`: `F005` (Ender-3 V3 KE), mac `FCEE110432F7`
-- Internal storage: 8 GB eMMC (общая с прошивкой)
-- Веб-сервер: Go, кастомный (НЕ полный Moonraker: `/server/files/list`, `/printer` — 404)
-- Корень UI: `/` — Vue SPA (бандл `/static/js/app.*.js`); API-эндпоинты — искать в бандле
+```powershell
+$env:TMP=$env:TEMP="C:\Users\YOUR_USER\go-cache"   # AV-обход: линковка Go exe
+wails3 dev        # dev-режим (vite :9245 + авто-пересборка Go)
+wails3 build      # → build/bin/ender-space.exe
+```
+
+```bash
+gofmt -l internal/ main.go
+go vet ./internal/...
+go test ./internal/... -count=1
+```
+
+`go build ./...` сломан шаблоном `build/ios` — собирать `go build .` (фронтенд эмбедится из `frontend/dist`).
+
+## Тестовый принтер
+
+- Модель по `GET /info`: `F005` (Ender-3 V3 KE), eMMC 8 GB (общая с прошивкой)
+- Живые проверки — как Go-тесты с `ENDERSPACE_LIVE=1` (см. `internal/app/*_test.go`)
+
+## Ограничения окружения
+
+- PowerShell: `curl` = `Invoke-WebRequest` (использовать `curl.exe`)
+- Wails v3 CLI: `go install github.com/wailsapp/wails/v3/cmd/wails3@latest`

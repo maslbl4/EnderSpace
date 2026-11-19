@@ -1,48 +1,61 @@
-// Форматирование значений для отображения (ru-локаль: запятая, пробелы в разрядах).
+// Форматирование значений для отображения. Единицы и разделители —
+// по текущему языку (i18n): ru «4,2 МБ / 9ч 20м / 1 240 г»,
+// en «4.2 MB / 9h 20m / 1,240 g».
+import { getLang } from '../i18n';
 
-const UNITS = ['Б', 'КБ', 'МБ', 'ГБ'] as const;
+const RU = {
+  units: ['Б', 'КБ', 'МБ', 'ГБ'],
+  dot: ',',
+  thousands: ' ',
+  h: 'ч',
+  m: 'м',
+  s: 'с',
+  g: 'г',
+} as const;
 
-// formatBytes: до 1023 — «Б», иначе 1 знак после запятой: «4,2 МБ», «1,5 ГБ».
+const EN = {
+  units: ['B', 'KB', 'MB', 'GB'],
+  dot: '.',
+  thousands: ',',
+  h: 'h',
+  m: 'm',
+  s: 's',
+  g: 'g',
+} as const;
+
+const loc = () => (getLang() === 'en' ? EN : RU);
+
+// formatBytes: до 1023 — «Б»/«B», иначе 1 знак после десятичного разделителя.
 export function formatBytes(bytes: number): string {
+  const L = loc();
   let v = bytes;
   let i = 0;
-  while (v >= 1024 && i < UNITS.length - 1) {
+  while (v >= 1024 && i < L.units.length - 1) {
     v /= 1024;
     i++;
   }
-  const s = i === 0 ? String(Math.round(v)) : v.toFixed(1).replace('.', ',');
-  return `${s} ${UNITS[i]}`;
+  const s = i === 0 ? String(Math.round(v)) : v.toFixed(1).replace('.', L.dot);
+  return `${s} ${L.units[i]}`;
 }
 
-// formatDuration: «9ч 20м» / «42м» / «35с».
+// formatDuration: «9ч 20м» / «9h 20m», «42м» / «42m», «35с» / «35s».
 export function formatDuration(totalSeconds: number): string {
+  const L = loc();
   const h = Math.floor(totalSeconds / 3600);
   const m = Math.round((totalSeconds % 3600) / 60);
   if (h > 0) {
-    return `${h}ч ${m}м`;
+    return `${h}${L.h} ${m}${L.m}`;
   }
   if (m > 0) {
-    return `${m}м`;
+    return `${m}${L.m}`;
   }
-  return `${Math.max(1, Math.round(totalSeconds))}с`;
+  return `${Math.max(1, Math.round(totalSeconds))}${L.s}`;
 }
 
-// plural — русская плюрализация: plural(21, ['файл','файла','файлов']) → «файл».
-export function plural(n: number, forms: [string, string, string]): string {
-  const n10 = n % 10;
-  const n100 = n % 100;
-  if (n10 === 1 && n100 !== 11) {
-    return forms[0];
-  }
-  if (n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) {
-    return forms[1];
-  }
-  return forms[2];
-}
-
-// formatGrams: «18 г», «45,2 г», «1 240 г» (пробелы в разрядах).
+// formatGrams: «18 г» / «18 g», «45,2 г» / «45.2 g», «1 240 г» / «1,240 g».
 export function formatGrams(grams: number): string {
+  const L = loc();
   const s =
-    grams >= 100 ? String(Math.round(grams)) : grams.toFixed(1).replace('.', ',');
-  return `${s.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} г`;
+    grams >= 100 ? String(Math.round(grams)) : grams.toFixed(1).replace('.', L.dot);
+  return `${s.replace(/\B(?=(\d{3})+(?!\d))/g, L.thousands)} ${L.g}`;
 }

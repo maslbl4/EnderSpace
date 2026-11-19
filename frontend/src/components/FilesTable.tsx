@@ -2,7 +2,7 @@
 // «—» — значение не найдено (всегда в конце сортировки); сортировка по
 // всем колонкам; скелетон во время загрузки; зум превью при наведении.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { t } from '../i18n';
+import { t, useI18n } from '../i18n';
 import type { FileMeta } from '../lib/api';
 import { formatBytes, formatDuration, formatGrams } from '../lib/format';
 
@@ -27,6 +27,7 @@ export default function FilesTable({
   onToggle: (key: string) => void;
   onToggleAll: () => void;
 }) {
+  useI18n(); // перерисовка при смене языка
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [sortAsc, setSortAsc] = useState(true);
   const [zoom, setZoom] = useState<Zoom | null>(null);

@@ -255,6 +255,16 @@ body {
 .icon-btn:hover { border-color: rgba(255, 77, 77, 0.55); }
 .icon-btn:active { transform: scale(0.94); }
 .icon-btn:disabled { opacity: 0.45; cursor: default; }
+/* Переключатель языка: текстовый (EN/RU), ширина под содержимое. */
+.icon-btn.lang { width: auto; padding: 0 10px; font-size: 13px; font-weight: 600; letter-spacing: 0.05em; }
+
+/* Шапка экрана подключения: логотип слева, переключатель языка справа. */
+.connect-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-2);
+}
 
 .btn-ghost {
     background: var(--glass);

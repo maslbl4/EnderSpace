@@ -1,7 +1,7 @@
 // Модальное подтверждение удаления: список файлов, сколько освободится,
 // Отмена/Удалить; во время удаления — спиннер и блокировка кнопок.
-import { t } from '../i18n';
-import { formatBytes, plural } from '../lib/format';
+import { plural, t, useI18n } from '../i18n';
+import { formatBytes } from '../lib/format';
 
 const MAX_LISTED = 8; // дальше — «…ещё N»
 
@@ -18,6 +18,7 @@ export default function ConfirmDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  useI18n(); // перерисовка при смене языка
   const shown = names.slice(0, MAX_LISTED);
   const rest = names.length - shown.length;
 
@@ -47,7 +48,8 @@ export default function ConfirmDialog({
           {rest > 0 ? <li className="muted">{t('moreFiles').replace('%d', String(rest))}</li> : null}
         </ul>
         <p className="modal-note">
-          {names.length} {plural(names.length, ['файл', 'файла', 'файлов'])} ·{' '}
+          {names.length}{' '}
+          {plural(names.length, [t('fileOne'), t('fileFew'), t('fileMany')])} ·{' '}
           {t('deleteFree').replace('%s', formatBytes(bytes))}
         </p>
         <div className="modal-actions">

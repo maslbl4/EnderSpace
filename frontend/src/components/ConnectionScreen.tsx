@@ -1,8 +1,9 @@
 // Экран подключения: поле IP + «Подключить» + последнее значение из конфига.
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { t } from '../i18n';
+import { t, useI18n } from '../i18n';
 import { api } from '../lib/api';
+import LangToggle from './LangToggle';
 
 // validIp — формат a.b.c.d (0–255), ничего больше (hostname не поддерживаем).
 function validIp(ip: string): boolean {
@@ -14,6 +15,7 @@ function validIp(ip: string): boolean {
 }
 
 export default function ConnectionScreen({ onConnected }: { onConnected: () => void }) {
+  useI18n(); // перерисовка при смене языка
   const [ip, setIp] = useState('');
   const [lastIp, setLastIp] = useState('');
   const [busy, setBusy] = useState(false);
@@ -54,10 +56,13 @@ export default function ConnectionScreen({ onConnected }: { onConnected: () => v
 
   return (
     <main className="container">
-      <header className="brand">
-        <h1 className="title">
-          <span className="title-accent">{t('appTitle')}</span>
-        </h1>
+      <header className="connect-head">
+        <div className="brand">
+          <h1 className="title">
+            <span className="title-accent">{t('appTitle')}</span>
+          </h1>
+        </div>
+        <LangToggle />
       </header>
       <p className="subtitle">{t('connectSubtitle')}</p>
 
