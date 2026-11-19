@@ -21,7 +21,11 @@ var assets embed.FS
 
 func main() {
 	// Сервис приложения: подключение к принтеру, память, файлы, удаление.
-	svc := app.NewApp(configDir())
+	// События обогащения (files:progress / files:enriched / files:done)
+	// уходят во фронтенд через Wails-рантайм.
+	svc := app.NewAppWithSink(configDir(), func(name string, data any) {
+		_ = application.Get().Event.Emit(name, data)
+	})
 
 	wapp := application.New(application.Options{
 		Name:        "ender-space",

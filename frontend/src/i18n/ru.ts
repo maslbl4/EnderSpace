@@ -24,6 +24,7 @@ export const ru = {
   storageEmmc: 'eMMC',
   storageSystem: 'Система',
   legendModels: 'Модели (G-коды)',
+  enriching: 'Заполняем время печати и превью…',
   filesTitle: 'Файлы',
   colName: 'Имя файла',
   colSize: 'Размер',

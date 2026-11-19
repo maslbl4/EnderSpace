@@ -38,8 +38,11 @@ export function Disconnect(): $CancellablePromise<void> {
 }
 
 /**
- * ListFiles — список файлов, обогащённый временем печати и граммами из
- * заголовков G-кода (параллельно, лимит enrichWorkers; кэш по path+size).
+ * ListFiles — фаза 1: мгновенный список из WS (имя, размер; время/граммы/
+ * превью — из кэша, если уже были). Фаза 2 — фоновое обогащение
+ * (startEnrich): результаты уходят во фронтенд событиями
+ * files:enriched / files:progress / files:done, таблица заполняется
+ * по мере их прихода.
  */
 export function ListFiles(): $CancellablePromise<printer$0.FileMeta[] | null> {
     return $Call.ByID(3623285058);

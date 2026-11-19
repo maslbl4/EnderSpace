@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"ender-space/internal/config"
 	"ender-space/internal/printer"
@@ -81,6 +82,70 @@ func newTestApp(t *testing.T, m *mockPrinter) *App {
 	return NewAppWithClient(t.TempDir(), func(ip string) PrinterAPI { return m })
 }
 
+// eventRecorder — EventSink для тестов: собирает события обогащения.
+type eventRecorder struct {
+	mu       sync.Mutex
+	enriched []printer.FileMeta
+	progress []EnrichProgress
+	done     chan struct{} // закрыт после files:done (однократно)
+}
+
+func newEventRecorder() *eventRecorder {
+	return &eventRecorder{done: make(chan struct{})}
+}
+
+func (r *eventRecorder) sink(name string, data any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	switch name {
+	case filesEnrichedEvent:
+		r.enriched = append(r.enriched, data.(printer.FileMeta))
+	case filesProgressEvent:
+		r.progress = append(r.progress, data.(EnrichProgress))
+	case filesDoneEvent:
+		select {
+		case <-r.done:
+		default:
+			close(r.done)
+		}
+	}
+}
+
+// waitForDone — ждёт, пока фоновое обогащение не шлёт files:done.
+func (r *eventRecorder) waitForDone(t *testing.T) {
+	t.Helper()
+	select {
+	case <-r.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("files:done не пришёл за 10 с")
+	}
+}
+
+// enrichedByName — данные файла из события files:enriched.
+func (r *eventRecorder) enrichedByName(t *testing.T, name string) printer.FileMeta {
+	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, fm := range r.enriched {
+		if fm.Name == name {
+			return fm
+		}
+	}
+	t.Fatalf("files:enriched для %s не пришёл", name)
+	return printer.FileMeta{}
+}
+
+// newTestAppWithEvents — App с sink-коллектором и уже «подключённым» клиентом.
+func newTestAppWithEvents(t *testing.T, m *mockPrinter) (*App, *eventRecorder) {
+	t.Helper()
+	rec := newEventRecorder()
+	a := NewAppWithClientAndSink(t.TempDir(), func(ip string) PrinterAPI { return m }, rec.sink)
+	a.connected = true
+	a.client = m
+	t.Cleanup(func() { _ = a.Disconnect() })
+	return a, rec
+}
+
 // loadAppConfig — читает config.json из каталога приложения (тест-хелпер).
 func loadAppConfig(a *App) (*config.Config, error) {
 	return config.Load(a.cfgDir)
@@ -97,28 +162,29 @@ func TestListFilesMergesGcodeInfo(t *testing.T) {
 			"b.gcode": []byte("; estimated printing time (normal mode) = 2h 0m 0s\n; total filament used [g] = 20\n"),
 		},
 	}
-	app := newTestApp(t, m)
-	app.connected = true
-	app.client = m
+	app, rec := newTestAppWithEvents(t, m)
 
 	meta, err := app.ListFiles(context.Background())
 	if err != nil {
 		t.Fatalf("ListFiles: %v", err)
 	}
 	if len(meta) != 2 {
-		t.Fatalf("len = %d, want 2", len(meta))
+		t.Fatalf("фаза 1: len = %d, want 2 (список возвращается сразу)", len(meta))
 	}
-	if meta[0].PrintTime == nil || *meta[0].PrintTime != 3600 {
-		t.Errorf("a: PrintTime = %v, want 3600", meta[0].PrintTime)
+	rec.waitForDone(t)
+	a := rec.enrichedByName(t, "a.gcode")
+	if a.PrintTime == nil || *a.PrintTime != 3600 {
+		t.Errorf("a: PrintTime = %v, want 3600", a.PrintTime)
 	}
-	if meta[0].Filament == nil || *meta[0].Filament != 10 {
-		t.Errorf("a: Filament = %v, want 10", meta[0].Filament)
+	if a.Filament == nil || *a.Filament != 10 {
+		t.Errorf("a: Filament = %v, want 10", a.Filament)
 	}
-	if meta[1].PrintTime == nil || *meta[1].PrintTime != 7200 {
-		t.Errorf("b: PrintTime = %v, want 7200", meta[1].PrintTime)
+	b := rec.enrichedByName(t, "b.gcode")
+	if b.PrintTime == nil || *b.PrintTime != 7200 {
+		t.Errorf("b: PrintTime = %v, want 7200", b.PrintTime)
 	}
-	if meta[1].Filament == nil || *meta[1].Filament != 20 {
-		t.Errorf("b: Filament = %v, want 20", meta[1].Filament)
+	if b.Filament == nil || *b.Filament != 20 {
+		t.Errorf("b: Filament = %v, want 20", b.Filament)
 	}
 }
 
@@ -131,22 +197,23 @@ func TestListFilesParserFailureKeepsFile(t *testing.T) {
 		gcode:       map[string][]byte{"a.gcode": []byte("; total filament used [g] = 5\n")},
 		downloadErr: map[string]error{"b.gcode": errors.New("mock: сеть упала")},
 	}
-	app := newTestApp(t, m)
-	app.connected = true
-	app.client = m
+	app, rec := newTestAppWithEvents(t, m)
 
 	meta, err := app.ListFiles(context.Background())
 	if err != nil {
 		t.Fatalf("ошибка скачивания одного файла не должна ронять список: %v", err)
 	}
 	if len(meta) != 2 {
-		t.Fatalf("len = %d, want 2", len(meta))
+		t.Fatalf("фаза 1: len = %d, want 2", len(meta))
 	}
-	if meta[1].PrintTime != nil || meta[1].Filament != nil {
-		t.Errorf("b: ожидалось «—» (nil), got PrintTime=%v Filament=%v", meta[1].PrintTime, meta[1].Filament)
+	rec.waitForDone(t)
+	b := rec.enrichedByName(t, "b.gcode")
+	if b.PrintTime != nil || b.Filament != nil {
+		t.Errorf("b: ожидалось «—» (nil), got PrintTime=%v Filament=%v", b.PrintTime, b.Filament)
 	}
-	if meta[0].Filament == nil || *meta[0].Filament != 5 {
-		t.Errorf("a: Filament = %v, want 5", meta[0].Filament)
+	a := rec.enrichedByName(t, "a.gcode")
+	if a.Filament == nil || *a.Filament != 5 {
+		t.Errorf("a: Filament = %v, want 5", a.Filament)
 	}
 }
 
@@ -281,8 +348,10 @@ func TestListFilesCachesGcodeInfo(t *testing.T) {
 		files: []printer.RawFile{{Path: "/p", Name: "a.gcode", Size: 100}},
 		gcode: map[string][]byte{"a.gcode": []byte("; total filament used [g] = 5\n")},
 	}
-	app := newTestApp(t, m)
+	rec := newEventRecorder()
+	app := NewAppWithClientAndSink(t.TempDir(), func(ip string) PrinterAPI { return m }, rec.sink)
 	app.connected = true
+	t.Cleanup(func() { _ = app.Disconnect() })
 	// Подсчёт скачиваний обёрткой
 	wrapped := &countingDownloader{m: m, n: &downloads}
 	app.client = wrapped
@@ -290,9 +359,21 @@ func TestListFilesCachesGcodeInfo(t *testing.T) {
 	if _, err := app.ListFiles(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := app.ListFiles(context.Background()); err != nil {
+	rec.waitForDone(t)
+
+	// Вторая фаза 1: данные уже в кэше — время/граммы сразу, без ожидания
+	// событий и без повторного скачивания.
+	meta, err := app.ListFiles(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
+	if len(meta) != 1 {
+		t.Fatalf("фаза 1: len = %d, want 1", len(meta))
+	}
+	if meta[0].Filament == nil || *meta[0].Filament != 5 {
+		t.Errorf("фаза 1: Filament = %v, want 5 (из кэша сразу)", meta[0].Filament)
+	}
+	rec.waitForDone(t)
 	if downloads != 1 {
 		t.Errorf("скачиваний = %d, want 1 (кэш по path+size)", downloads)
 	}
@@ -338,26 +419,30 @@ func TestListFilesFallbacks(t *testing.T) {
 			"Holder.gcode":           []byte("G28\nG1 X10\n"),
 		},
 	}
-	app := newTestApp(t, m)
-	app.connected = true
-	app.client = m
+	app, rec := newTestAppWithEvents(t, m)
 
 	meta, err := app.ListFiles(context.Background())
 	if err != nil {
 		t.Fatalf("ListFiles: %v", err)
 	}
-	if meta[0].PrintTime == nil || *meta[0].PrintTime != 2*3600+30*60 {
-		t.Errorf("orcs: PrintTime = %v, want 9000 (из имени)", meta[0].PrintTime)
+	if len(meta) != 2 {
+		t.Fatalf("фаза 1: len = %d, want 2", len(meta))
 	}
-	if meta[0].Filament == nil {
+	rec.waitForDone(t)
+	orcs := rec.enrichedByName(t, "orcs_3_PLA_2h30m.gcode")
+	if orcs.PrintTime == nil || *orcs.PrintTime != 2*3600+30*60 {
+		t.Errorf("orcs: PrintTime = %v, want 9000 (из имени)", orcs.PrintTime)
+	}
+	if orcs.Filament == nil {
 		t.Fatal("orcs: Filament = nil, want пересчёт из 3048 мм")
 	}
 	// 3048 мм × π·0.875²/1000 × 1.24 ≈ 9.09 г
-	if *meta[0].Filament < 9.0 || *meta[0].Filament > 9.2 {
-		t.Errorf("orcs: Filament = %v, want ≈ 9.09", *meta[0].Filament)
+	if *orcs.Filament < 9.0 || *orcs.Filament > 9.2 {
+		t.Errorf("orcs: Filament = %v, want ≈ 9.09", *orcs.Filament)
 	}
-	if meta[1].PrintTime != nil || meta[1].Filament != nil {
-		t.Errorf("Holder: ожидалось «—», got PrintTime=%v Filament=%v", meta[1].PrintTime, meta[1].Filament)
+	holder := rec.enrichedByName(t, "Holder.gcode")
+	if holder.PrintTime != nil || holder.Filament != nil {
+		t.Errorf("Holder: ожидалось «—», got PrintTime=%v Filament=%v", holder.PrintTime, holder.Filament)
 	}
 }
 
@@ -371,16 +456,61 @@ func TestListFilesHeaderBeatsFilename(t *testing.T) {
 			"part_PLA_1h0m0s.gcode": []byte("; estimated printing time (normal mode) = 2h 0m 0s\n"),
 		},
 	}
-	app := newTestApp(t, m)
-	app.connected = true
-	app.client = m
+	app, rec := newTestAppWithEvents(t, m)
+
+	if _, err := app.ListFiles(context.Background()); err != nil {
+		t.Fatalf("ListFiles: %v", err)
+	}
+	rec.waitForDone(t)
+	fm := rec.enrichedByName(t, "part_PLA_1h0m0s.gcode")
+	if fm.PrintTime == nil || *fm.PrintTime != 7200 {
+		t.Errorf("PrintTime = %v, want 7200 (из заголовка, не из имени)", fm.PrintTime)
+	}
+}
+
+// События обогащения: на каждый файл files:enriched + files:progress
+// (Done растёт, Total постоянен), в конце files:done; фаза 1 — сразу.
+func TestEnrichEmitsProgress(t *testing.T) {
+	m := &mockPrinter{
+		files: []printer.RawFile{
+			{Path: "/p", Name: "a.gcode", Size: 100},
+			{Path: "/p", Name: "b.gcode", Size: 200},
+			{Path: "/p", Name: "c.gcode", Size: 300},
+		},
+		gcode: map[string][]byte{
+			"a.gcode": []byte("G28\n"),
+			"b.gcode": []byte("G28\n"),
+			"c.gcode": []byte("G28\n"),
+		},
+	}
+	app, rec := newTestAppWithEvents(t, m)
 
 	meta, err := app.ListFiles(context.Background())
 	if err != nil {
 		t.Fatalf("ListFiles: %v", err)
 	}
-	if meta[0].PrintTime == nil || *meta[0].PrintTime != 7200 {
-		t.Errorf("PrintTime = %v, want 7200 (из заголовка, не из имени)", meta[0].PrintTime)
+	if len(meta) != 3 {
+		t.Fatalf("фаза 1: len = %d, want 3 (список сразу)", len(meta))
+	}
+	rec.waitForDone(t)
+
+	rec.mu.Lock()
+	progs := append([]EnrichProgress(nil), rec.progress...)
+	enriched := len(rec.enriched)
+	rec.mu.Unlock()
+	if enriched != 3 {
+		t.Errorf("files:enriched = %d, want 3", enriched)
+	}
+	if len(progs) != 3 {
+		t.Fatalf("files:progress = %d, want 3 (по одному на файл)", len(progs))
+	}
+	for _, p := range progs {
+		if p.Total != 3 {
+			t.Errorf("Total = %d, want 3", p.Total)
+		}
+	}
+	if progs[len(progs)-1].Done != 3 {
+		t.Errorf("последний Done = %d, want 3", progs[len(progs)-1].Done)
 	}
 }
 
@@ -395,18 +525,22 @@ func TestListFilesThumb(t *testing.T) {
 		gcode:  map[string][]byte{"a.gcode": []byte("G28\n"), "b.gcode": []byte("G28\n")},
 		thumbs: map[string][]byte{"a.gcode": png},
 	}
-	app := newTestApp(t, m)
-	app.connected = true
-	app.client = m
+	app, rec := newTestAppWithEvents(t, m)
 
 	meta, err := app.ListFiles(context.Background())
 	if err != nil {
 		t.Fatalf("ListFiles: %v", err)
 	}
-	if !strings.HasPrefix(meta[0].Thumb, "data:image/png;base64,") {
-		t.Errorf("a: Thumb = %q, want data URI", meta[0].Thumb)
+	if len(meta) != 2 {
+		t.Fatalf("фаза 1: len = %d, want 2", len(meta))
 	}
-	if meta[1].Thumb != "" {
-		t.Errorf("b: Thumb = %q, want «» (нет превью)", meta[1].Thumb)
+	rec.waitForDone(t)
+	a := rec.enrichedByName(t, "a.gcode")
+	if !strings.HasPrefix(a.Thumb, "data:image/png;base64,") {
+		t.Errorf("a: Thumb = %q, want data URI", a.Thumb)
+	}
+	b := rec.enrichedByName(t, "b.gcode")
+	if b.Thumb != "" {
+		t.Errorf("b: Thumb = %q, want «» (нет превью)", b.Thumb)
 	}
 }

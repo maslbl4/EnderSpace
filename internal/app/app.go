@@ -13,12 +13,31 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"ender-space/internal/config"
 	"ender-space/internal/gcode"
 	"ender-space/internal/printer"
 )
+
+// EventSink — отправка событий в фронтенд (в main — Wails-рантайм;
+// в тестах — коллектор). nil — события не шлём.
+type EventSink func(name string, data any)
+
+// Имена событий обогащения списка файлов (фаза 2).
+const (
+	filesProgressEvent = "files:progress" // data: EnrichProgress
+	filesEnrichedEvent = "files:enriched" // data: printer.FileMeta
+	filesDoneEvent     = "files:done"     // data: nil — все файлы обработаны
+)
+
+// EnrichProgress — прогресс фонового обогащения (обработано/всего).
+// Без json-тегов: в событии поля уходят как Done/Total (как в FileMeta).
+type EnrichProgress struct {
+	Done  int
+	Total int
+}
 
 // PrinterAPI — то, что App требует от принтера (реализует *printer.Client;
 // в тестах — мок).
@@ -38,8 +57,8 @@ const gcodeHeadBytes = 256 * 1024
 // thumbLimit — превью принтера маленькие (96×96/300×300 PNG), 1 МБ с запасом.
 const thumbLimit = 1 << 20
 
-// enrichWorkers — параллелизм скачивания G-кодов при ListFiles.
-const enrichWorkers = 4
+// enrichWorkers — параллелизм скачивания G-кодов при фоновом обогащении.
+const enrichWorkers = 8
 
 // App — состояние подключения к одному принтеру + операции над его памятью.
 type App struct {
@@ -47,30 +66,44 @@ type App struct {
 	cfgDir        string
 	cfg           *config.Config
 	clientFactory func(ip string) PrinterAPI
+	sink          EventSink // события для фронтенда (nil — не шлём)
 	ip            string
 	connected     bool
 	model         string
 	client        PrinterAPI
 	state         *printer.State     // последнее смерженное состояние
 	stateCancel   context.CancelFunc // остановка WatchState при Disconnect
+	enrichCancel  context.CancelFunc // остановка фонового обогащения
 	gcodeCache    map[string]gcode.Info
 	thumbCache    map[string]string // «path|name» → data URI ("" — нет)
 }
 
-// NewApp создаёт App, говорящий с реальным принтером по IP.
+// NewApp создаёт App, говорящий с реальным принтером по IP (без событий).
 func NewApp(cfgDir string) *App {
-	return NewAppWithClient(cfgDir, func(ip string) PrinterAPI {
+	return NewAppWithSink(cfgDir, nil)
+}
+
+// NewAppWithSink — то же, но события обогащения уходят в sink
+// (в main — Wails-рантайм).
+func NewAppWithSink(cfgDir string, sink EventSink) *App {
+	return NewAppWithClientAndSink(cfgDir, func(ip string) PrinterAPI {
 		return printer.New("http://" + ip)
-	})
+	}, sink)
 }
 
 // NewAppWithClient — то же, но фабрика клиента задаётся снаружи (тесты).
 func NewAppWithClient(cfgDir string, factory func(ip string) PrinterAPI) *App {
+	return NewAppWithClientAndSink(cfgDir, factory, nil)
+}
+
+// NewAppWithClientAndSink — полный конструктор: фабрика клиента + события.
+func NewAppWithClientAndSink(cfgDir string, factory func(ip string) PrinterAPI, sink EventSink) *App {
 	cfg, _ := config.Load(cfgDir) // Load не ошибается: нет файла/мусор → дефолты
 	return &App{
 		cfgDir:        cfgDir,
 		cfg:           cfg,
 		clientFactory: factory,
+		sink:          sink,
 		gcodeCache:    map[string]gcode.Info{},
 		thumbCache:    map[string]string{},
 	}
@@ -118,6 +151,10 @@ func (a *App) disconnectLocked() {
 	if a.stateCancel != nil {
 		a.stateCancel()
 		a.stateCancel = nil
+	}
+	if a.enrichCancel != nil {
+		a.enrichCancel()
+		a.enrichCancel = nil
 	}
 	a.connected = false
 	a.client = nil
@@ -187,8 +224,11 @@ func (a *App) Storage() (printer.Storage, error) {
 	return printer.Storage{Total: total, Used: used, System: system, Free: free}, nil
 }
 
-// ListFiles — список файлов, обогащённый временем печати и граммами из
-// заголовков G-кода (параллельно, лимит enrichWorkers; кэш по path+size).
+// ListFiles — фаза 1: мгновенный список из WS (имя, размер; время/граммы/
+// превью — из кэша, если уже были). Фаза 2 — фоновое обогащение
+// (startEnrich): результаты уходят во фронтенд событиями
+// files:enriched / files:progress / files:done, таблица заполняется
+// по мере их прихода.
 func (a *App) ListFiles(ctx context.Context) ([]printer.FileMeta, error) {
 	client, ok := a.activeClient()
 	if !ok {
@@ -198,25 +238,96 @@ func (a *App) ListFiles(ctx context.Context) ([]printer.FileMeta, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	meta := make([]printer.FileMeta, len(files))
-	jobs := make(chan int)
-	var wg sync.WaitGroup
+	for i, rf := range files {
+		meta[i] = a.prefill(rf)
+	}
+	a.startEnrich(client, files)
+	return meta, nil
+}
+
+// prefill — FileMeta без сетевых запросов: время/граммы из gcode-кэша,
+// превью из thumb-кэша (нет — nil/"", догонят события обогащения).
+func (a *App) prefill(rf printer.RawFile) printer.FileMeta {
+	fm := printer.FileMeta{Path: rf.Path, Name: rf.Name, Size: rf.Size}
+	a.mu.Lock()
+	if info, ok := a.gcodeCache[gcodeCacheKey(rf)]; ok {
+		fm.PrintTime = info.TimeSeconds
+		fm.Filament = info.FilamentGrams
+	}
+	fm.Thumb = a.thumbCache[rf.Path+"|"+rf.Name]
+	a.mu.Unlock()
+	return fm
+}
+
+// startEnrich — фаза 2: пул воркеров (enrichWorkers) добирает время/
+// граммы/превью и шлёт их событиями. Новая фаза (⟳, повторное ListFiles)
+// отменяет предыдущую; отменённая фаза события не шлёт.
+func (a *App) startEnrich(client PrinterAPI, files []printer.RawFile) {
+	total := len(files)
+
+	a.mu.Lock()
+	if a.enrichCancel != nil {
+		a.enrichCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.enrichCancel = cancel
+	a.mu.Unlock()
+
+	if total == 0 {
+		cancel()
+		a.emit(filesDoneEvent, nil)
+		return
+	}
+
+	var (
+		wg   sync.WaitGroup
+		done int32
+	)
+	// Буфер на все файлы: фидер не блокируется, если воркеры вышли
+	// досрочно (отмена фазы) — канал просто уйдёт в GC вместе с фазами.
+	jobs := make(chan int, total)
 	for i := 0; i < enrichWorkers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				meta[i] = a.enrich(ctx, client, files[i])
+				fm := a.enrich(ctx, client, files[i])
+				if ctx.Err() != nil {
+					return // началась новая фаза — не засоряем её старыми событиями
+				}
+				a.emit(filesEnrichedEvent, fm)
+				a.emit(filesProgressEvent, EnrichProgress{
+					Done:  int(atomic.AddInt32(&done, 1)),
+					Total: total,
+				})
 			}
 		}()
 	}
-	for i := range files {
-		jobs <- i
+	go func() {
+		for i := range files {
+			jobs <- i
+		}
+		close(jobs)
+	}()
+	go func() {
+		wg.Wait()
+		finished := ctx.Err() == nil // до cancel: фаза не была предвзята новой
+		cancel()
+		if finished {
+			a.emit(filesDoneEvent, nil)
+		}
+	}()
+}
+
+// emit — событие в sink (без sink — молча).
+func (a *App) emit(name string, data any) {
+	a.mu.Lock()
+	sink := a.sink
+	a.mu.Unlock()
+	if sink != nil {
+		sink(name, data)
 	}
-	close(jobs)
-	wg.Wait()
-	return meta, nil
 }
 
 // enrich — FileMeta для одного файла. Данные и их источники (по убыванию
@@ -228,9 +339,15 @@ func (a *App) ListFiles(ctx context.Context) ([]printer.FileMeta, error) {
 //   - превью: GET /downloads/humbnail/<base>.png → data URI.
 //
 // Ошибка скачивания/парсинга — файл остаётся в списке с nil («—»).
+// gcodeCacheKey — ключ gcode-кэша: при изменении размера файла данные
+// из заголовка устарели.
+func gcodeCacheKey(rf printer.RawFile) string {
+	return rf.Path + "|" + rf.Name + "|" + strconv.FormatInt(rf.Size, 10)
+}
+
 func (a *App) enrich(ctx context.Context, client PrinterAPI, rf printer.RawFile) printer.FileMeta {
 	fm := printer.FileMeta{Path: rf.Path, Name: rf.Name, Size: rf.Size}
-	key := rf.Path + "|" + rf.Name + "|" + strconv.FormatInt(rf.Size, 10)
+	key := gcodeCacheKey(rf)
 
 	a.mu.Lock()
 	info, cached := a.gcodeCache[key]

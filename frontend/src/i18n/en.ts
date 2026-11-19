@@ -24,6 +24,7 @@ export const en: Record<I18nKey, string> = {
   storageEmmc: 'eMMC',
   storageSystem: 'System',
   legendModels: 'Models (G-code)',
+  enriching: 'Filling in print times and previews…',
   filesTitle: 'Files',
   colName: 'File name',
   colSize: 'Size',

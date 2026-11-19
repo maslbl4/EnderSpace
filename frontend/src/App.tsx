@@ -2,6 +2,7 @@
 // Основной экран: память + таблица файлов грузятся сразу после подключения;
 // выбор файлов (чекбоксы) → подтверждение → удаление → авто-refresh.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Events } from '@wailsio/runtime';
 import ConnectionScreen from './components/ConnectionScreen';
 import ConfirmDialog from './components/ConfirmDialog';
 import FilesTable, { fileKey } from './components/FilesTable';
@@ -12,6 +13,18 @@ import type { FileMeta, PrinterStatus, Storage } from './lib/api';
 import { formatBytes } from './lib/format';
 import { modelName } from './lib/model';
 import LangToggle from './components/LangToggle';
+
+// Данные события files:progress (Go: app.EnrichProgress, без json-тегов).
+type EnrichProgress = { Done: number; Total: number };
+
+// Событие files:enriched добирает только время/граммы/превью — имя/размер
+// из фазы 1 сохраняем.
+const mergeEnriched = (f: FileMeta, fm: FileMeta): FileMeta => ({
+  ...f,
+  PrintTime: fm.PrintTime ?? f.PrintTime,
+  Filament: fm.Filament ?? f.Filament,
+  Thumb: fm.Thumb || f.Thumb,
+});
 
 function App() {
   const [connected, setConnected] = useState(false);
@@ -32,14 +45,17 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  // Фаза 2: null — обогащение не идёт, иначе {Done, Total} из событий.
+  const [enrichProgress, setEnrichProgress] = useState<EnrichProgress | null>(null);
 
   const loading = files === null && !loadError;
 
-  // Память и список файлов параллельно; ошибка — баннер с «Повторить».
+  // Фаза 1: память и список файлов параллельно; ошибка — баннер с
+  // «Повторить». Старую таблицу при ⟳ не гасим (RPC фазы 1 мгновенный).
   // После перезагрузки выбор обрезаем до существующих файлов.
   const load = useCallback(async () => {
     setLoadError(null);
-    setFiles(null);
+    setEnrichProgress(null);
     try {
       const [st, fl] = await Promise.all([api.storage(), api.listFiles()]);
       setStorage(st);
@@ -49,7 +65,6 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
         return new Set([...prev].filter((k) => keys.has(k)));
       });
     } catch (err: unknown) {
-      setFiles(null);
       setLoadError(err instanceof Error ? err.message : String(err));
     }
   }, []);
@@ -58,6 +73,27 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Фаза 2: события бэкенда — таблица заполняется по мере прихода
+  // (время/граммы/превью), прогресс-полоска гаснет на files:done.
+  useEffect(() => {
+    const offProgress = Events.On('files:progress', (ev) => {
+      const p = ev.data as EnrichProgress;
+      setEnrichProgress({ Done: p.Done, Total: p.Total });
+    });
+    const offEnriched = Events.On('files:enriched', (ev) => {
+      const fm = ev.data as FileMeta;
+      setFiles((prev) =>
+        prev ? prev.map((f) => (fileKey(f) === fileKey(fm) ? mergeEnriched(f, fm) : f)) : prev,
+      );
+    });
+    const offDone = Events.On('files:done', () => setEnrichProgress(null));
+    return () => {
+      offProgress();
+      offEnriched();
+      offDone();
+    };
+  }, []);
 
   // Состояние принтера: обрыв связи возвращает на экран подключения.
   useEffect(() => {
@@ -202,6 +238,25 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
       {storage ? <StorageCard storage={storage} /> : loading ? (
         <div className="card storage-card">
           <div className="skeleton-row" />
+        </div>
+      ) : null}
+
+      {files !== null && enrichProgress ? (
+        <div
+          className="enrich-bar"
+          role="progressbar"
+          aria-valuenow={enrichProgress.Done}
+          aria-valuemin={0}
+          aria-valuemax={enrichProgress.Total}
+          aria-label={t('enriching')}
+        >
+          <div
+            className="enrich-fill"
+            style={{ width: `${(enrichProgress.Done / enrichProgress.Total) * 100}%` }}
+          />
+          <span className="enrich-label">
+            {t('enriching')} {enrichProgress.Done}/{enrichProgress.Total}
+          </span>
         </div>
       ) : null}
 
