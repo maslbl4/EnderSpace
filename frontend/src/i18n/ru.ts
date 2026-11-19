@@ -43,7 +43,7 @@ export const ru = {
   fileFew: 'файла',
   fileMany: 'файлов',
   langTitle: 'Сменить язык',
-  langButton: 'EN',
+  langButton: 'RU',
 } as const;
 
 export type I18nKey = keyof typeof ru;

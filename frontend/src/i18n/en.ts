@@ -43,5 +43,5 @@ export const en: Record<I18nKey, string> = {
   fileFew: 'files',
   fileMany: 'files',
   langTitle: 'Switch language',
-  langButton: 'RU',
+  langButton: 'EN',
 };

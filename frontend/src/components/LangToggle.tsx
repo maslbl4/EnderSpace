@@ -1,4 +1,4 @@
-// Переключатель языка (RU/EN): подпись — язык, на который переключит.
+// Переключатель языка (RU/EN): подпись — текущий язык.
 import { getLang, setLang, t, useI18n } from '../i18n';
 
 export default function LangToggle() {
