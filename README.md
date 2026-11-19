@@ -1,59 +1,185 @@
-# Welcome to Your New Wails3 Project!
+# EnderSpace
 
-Congratulations on generating your Wails3 application! This README will guide you through the next steps to get your project up and running.
+> Менеджер внутренней памяти Creality Ender-3 V3 KE: файлы, время печати, граммы, удаление.
 
-## Getting Started
+![Platform](https://img.shields.io/badge/platform-Windows-blue)
+![Wails](https://img.shields.io/badge/Wails-v3-purple)
 
-1. Navigate to your project directory in the terminal.
+---
 
-2. To run your application in development mode, use the following command:
+## Почему EnderSpace?
 
-   ```
-   wails3 dev
-   ```
+Веб-интерфейс принтера не показывает время печати и расход филамента по файлам, а удаление — по одному файлу, без подстраховки. EnderSpace — **один самодостаточный бинарник (Go + WebView)** без серверов и Docker.
 
-   This will start your application and enable hot-reloading for both frontend and backend changes.
+| | EnderSpace | Веб UI принтера |
+|---|---|---|
+| Время печати / граммы по файлу | **Да** (из заголовка G-кода) | Нет |
+| Массовое удаление | **Да**, с отчётом «удалено k из n» | По одному |
+| Последнее подключение | Запоминается в конфиге | Нет |
+| Зависимости | Go + WebView2 (есть в Win 11) | — |
 
-3. To build your application for production, use:
+**Протокол принтера задокументирован**: см. [`docs/api-contract.md`](docs/api-contract.md) (HTTP :80 + WebSocket :9999, не Moonraker).
 
-   ```
-   wails3 build
-   ```
+---
 
-   This will create a production-ready executable in the `build` directory.
+## Возможности
 
-## Exploring Wails3 Features
+**Подключение**
+- Ручной IP (запоминается в `config.json`)
 
-Now that you have your project set up, it's time to explore the features that Wails3 offers:
+**Память**
+- Занято / свободно / всего для 8 GB eMMC (оценка «≈» — память общая с прошивкой)
+- Занято = сумма размеров файлов
 
-1. **Check out the examples**: The best way to learn is by example. Visit the `examples` directory in the `v3/examples` directory to see various sample applications.
+**Файлы**
+- Имя, размер, время печати, граммы филамента
+- Время и граммы — из заголовка G-кода (паттерны OrcaSlicer; fallback: длина филамента × плотность × сечение)
+- Кэш по `(путь, размер)` — повторный Refresh не перескачивает G-коды
 
-2. **Run an example**: To run any of the examples, navigate to the example's directory and use:
+**Удаление**
+- Массовое, последовательное, с отчётом о частичном успехе
+- Блокируется, пока принтер печатает
 
-   ```
-   go run .
-   ```
+---
 
-   Note: Some examples may be under development during the alpha phase.
+## Быстрый старт
 
-3. **Explore the documentation**: Visit the [Wails3 documentation](https://v3.wails.io/) for in-depth guides and API references.
+1. Соберите приложение (ниже) или запустите dev-режим: `wails3 dev`.
+2. Введите IP принтера (например `192.168.3.166`) → **Подключить**.
+3. В шапке появится состояние (модель, занят ли принтер печатью) и память.
+4. В таблице — файлы: имя, размер, время печати, граммы.
+5. Отметьте файлы → **Удалить** (подтверждение) → отчёт о результате.
 
-4. **Join the community**: Have questions or want to share your progress? Join the [Wails Discord](https://discord.gg/JDdSxwjhGf) or visit the [Wails discussions on GitHub](https://github.com/wailsapp/wails/discussions).
+---
 
-## Project Structure
+## Сборка
 
-Take a moment to familiarize yourself with your project structure:
+**Пререквизиты:** Go 1.26+, Node.js 18+, Wails v3 CLI, Windows 11 (сборка нативная, без WSL).
 
-- `frontend/`: Contains your frontend code (HTML, CSS, JavaScript/TypeScript)
-- `main.go`: The entry point of your Go backend
-- `app.go`: Define your application structure and methods here
-- `wails.json`: Configuration file for your Wails project
+```powershell
+# Wails v3 CLI (если ещё не установлен)
+go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+```
 
-## Next Steps
+```bash
+# 1. Зависимости фронтенда (один раз)
+cd frontend && npm install && cd ..
 
-1. Modify the frontend in the `frontend/` directory to create your desired UI.
-2. Add backend functionality in `main.go`.
-3. Use `wails3 dev` to see your changes in real-time.
-4. When ready, build your application with `wails3 build`.
+# 2. Dev-режим: hot reload фронтенда (vite) + авто-пересборка Go
+wails3 dev
 
-Happy coding with Wails3! If you encounter any issues or have questions, don't hesitate to consult the documentation or reach out to the Wails community.
+# 3. Продакшен-сборка текущей платформы
+wails3 build        # → build/bin/ender-space.exe
+```
+
+**Обычный `go build`** (в CI, скриптах):
+
+```bash
+cd frontend && npm run build && cd ..   # фронтенд эмбедится из frontend/dist
+go build .            # → ender-space.exe
+```
+
+> `go build ./...` не работает: каталог `build/ios` — шаблон Wails, не компилируемый на Windows. Собирайте `.` (корневой пакет).
+
+**Тесты и качество** (нативно, Windows):
+
+```bash
+gofmt -l internal/ main.go     # должно быть пусто
+go vet ./internal/...
+go test ./internal/... -count=1
+```
+
+**После изменения публичных методов `App`** (`internal/app`) перегенерируйте TS-биндинги:
+
+```bash
+wails3 generate bindings       # → frontend/bindings/ (DO NOT EDIT)
+```
+
+Генератор сам вырезает `context.Context` из сигнатур — на фронтенде методы чистые: `Connect(ip)`, `ListFiles()`, `DeleteFiles(paths)`.
+
+---
+
+## Отладка
+
+**Dev-режим** — основной рабочий цикл:
+
+```bash
+wails3 dev
+```
+
+- Фронтенд: vite dev server, hot reload.
+- Go: пересборка и рестарт по изменению `.go` (каталог `frontend/` в игноре — фронт идёт через vite).
+
+**Брейкпоинты в Go** — любой IDE с поддержкой Delve (IntelliJ IDEA + Go plugin, VS Code + Go extension):
+
+- Запустите корневой пакет `.` в режиме отладки (нужен собранный `frontend/dist` — `go build .` / `wails3 build` его кладут в эмбед).
+- Или в терминале: `dlv debug .` (`go install github.com/go-delve/delve/cmd/dlv@latest`).
+
+**Диагностика протокола принтера** — без запуска приложения:
+
+```bash
+go run ./tools/probe 192.168.3.166 [имя-файла.gcode]
+```
+
+Проходит все точки контракта: `/info`, WS-список файлов, скачивание G-кода, превью. Полное описание — в [`docs/api-contract.md`](docs/api-contract.md).
+
+**Сетевые требования**
+
+| Канал | Где | Для чего |
+|---|---|---|
+| HTTP :80 | принтер | `/info`, скачивание G-кодов и превью |
+| WebSocket :9999 | принтер | список файлов, состояние, удаление |
+
+---
+
+## Конфигурация
+
+| Платформа | Каталог |
+|---|---|
+| Windows | `%APPDATA%\EnderSpace\config.json` |
+
+| Поле | Описание |
+|---|---|
+| `lastIP` | IP последнего принтера (подстановка при запуске) |
+| `totalBytes` | Общая ёмкость eMMC; не задан → 8 GiB |
+
+---
+
+## Структура проекта
+
+```
+main.go                  точка входа Wails: регистрирует *app.App
+internal/app/            сервисный слой (Connect/Storage/ListFiles/DeleteFiles)
+internal/printer/        клиент принтера: HTTP + WS 9999
+internal/gcode/          парсер заголовка G-кода (время печати, граммы)
+internal/config/         config.json
+frontend/                React 18 + TypeScript + Vite
+  bindings/              сгенерированные TS-биндинги (wails3 generate bindings)
+tools/probe/             диагностический CLI по контракту принтера
+docs/api-contract.md     контракт протокола (исследование живого принтера)
+```
+
+Тесты — рядом с кодом (`*_test.go`); сетевые части покрыты мок-клиентами и httptest, живой принтер не нужен.
+
+---
+
+## Tech Stack
+
+| Слой | Технология |
+|---|---|
+| Нативное окно + RPC-мост | [Wails v3](https://v3.wails.io) |
+| Бэкенд | Go 1.26 |
+| WS-клиент | [gorilla/websocket](https://github.com/gorilla/websocket) |
+| UI | React 18 + TypeScript + Vite |
+| Локализация | `frontend/src/i18n/ru.ts` + `t(key)` |
+
+---
+
+## Вклад
+
+Pull requests приветствуются. Правила, которые легко нарушить:
+
+1. **После изменения методов `App`** — `wails3 generate bindings` (файлы `frontend/bindings/` не править руками).
+2. **Все строки UI** — через `i18n/ru.ts` (`t(key)`), без хардкода.
+3. **Бэкенд без Wails**: сервисная логика живёт в `internal/` и тестируется без приложения; `main.go` остаётся тонким.
+4. Перед коммитом: `gofmt`, `go vet ./internal/...`, `go test ./internal/... -count=1`.
