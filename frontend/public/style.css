@@ -182,6 +182,40 @@ body {
    under the heading. */
 .greet { width: 62%; }
 
+/* ----- Connection form ------------------------------------------------------
+   Same input-box/btn language, full-width column with its own label,
+   error line and "last address" hint. */
+.connect {
+    width: 100%;
+    max-width: 420px;
+    --wails-draggable: no-drag;
+}
+.field-label {
+    display: block;
+    margin: 0 2px var(--s-1);
+    color: var(--muted);
+    font-size: 13.5px;
+    letter-spacing: 0.01em;
+}
+.error {
+    margin: var(--s-1) 2px 0;
+    color: #ff8091;
+    font-size: 14px;
+    line-height: 1.4;
+    overflow-wrap: break-word;
+    /* Текст ошибки нужно можно выделить и скопировать (баги бэкенда). */
+    -webkit-user-select: text;
+    user-select: text;
+    cursor: text;
+}
+.last {
+    margin: var(--s-1) 2px 0;
+    color: var(--muted);
+    font-size: 13.5px;
+    -webkit-user-select: text;
+    user-select: text;
+}
+
 /* Input font is pinned at 16px: iOS Safari/WKWebView zooms the page when an
    input under 16px gains focus, so the whole control is sized around that.
    Tight vertical padding keeps it ~36px tall, icon : control ≈ 1 : φ. */
