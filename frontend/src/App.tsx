@@ -252,29 +252,32 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
         </div>
       ) : null}
 
-      {/* Прогресс показываем сразу после запроса; Total появится, когда
-          фаза 1 отдаст список. Таблица — только после files:done. */}
+      {/* Таблица показывается только после files:done; до неё — заметная
+          панель-заглушка с прогрессом («Загружаем файлы… 23/58»).
+          Total появляется, когда фаза 1 отдаст список. */}
       {!tableReady && !loadError ? (
-        <div
-          className="enrich-bar"
-          role="progressbar"
-          aria-valuenow={enrichProgress?.Done ?? 0}
-          aria-valuemin={0}
-          aria-valuemax={enrichProgress?.Total ?? 0}
-          aria-label={t('enriching')}
-        >
-          {enrichProgress && enrichProgress.Total > 0 ? (
-            <div
-              className="enrich-fill"
-              style={{ width: `${(enrichProgress.Done / enrichProgress.Total) * 100}%` }}
-            />
-          ) : null}
-          <span className="enrich-label">
+        <div className="loading-panel card">
+          <div
+            className="loading-count"
+            role="progressbar"
+            aria-valuenow={enrichProgress?.Done ?? 0}
+            aria-valuemin={0}
+            aria-valuemax={enrichProgress?.Total ?? 0}
+            aria-label={t('enriching')}
+          >
             {t('enriching')}
             {enrichProgress && enrichProgress.Total > 0
               ? ` ${enrichProgress.Done}/${enrichProgress.Total}`
               : ''}
-          </span>
+          </div>
+          <div className="enrich-bar">
+            {enrichProgress && enrichProgress.Total > 0 ? (
+              <div
+                className="enrich-fill"
+                style={{ width: `${(enrichProgress.Done / enrichProgress.Total) * 100}%` }}
+              />
+            ) : null}
+          </div>
         </div>
       ) : null}
 
