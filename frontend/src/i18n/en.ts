@@ -24,6 +24,7 @@ export const en: Record<I18nKey, string> = {
   storageEmmc: 'eMMC',
   storageSystem: 'System',
   storageSystemNote: 'firmware and system files',
+  legendModels: 'Models (G-code)',
   filesTitle: 'Files',
   colName: 'File name',
   colSize: 'Size',

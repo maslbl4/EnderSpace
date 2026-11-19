@@ -357,6 +357,47 @@ body {
 }
 /* Сегмент «система» (прошивка) — приглушённый, чтобы отличался от файлов. */
 .meter-system { background: rgba(255, 255, 255, 0.28); }
+/* Легенда под шкалой: буллет + подпись + объём. */
+.meter-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    margin-top: var(--s-1);
+}
+.legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--muted);
+    font-size: 13px;
+    -webkit-user-select: text;
+    user-select: text;
+}
+.legend-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.legend-dot-files { background: var(--grad); }
+.legend-dot-system { background: rgba(255, 255, 255, 0.28); }
+/* Тултип над наведённым сегментом шкалы: fixed, не ловит курсор. */
+.meter-tip {
+    position: fixed;
+    z-index: 300;
+    max-width: 280px;
+    padding: 6px 10px;
+    background: rgba(17, 22, 35, 0.96);
+    border: 1px solid var(--glass-border);
+    border-radius: 9px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    color: var(--text);
+    font-size: 12.5px;
+    pointer-events: none;
+    white-space: nowrap;
+}
+.meter-tip-label { font-weight: 700; }
+.meter-tip-note { color: var(--muted); }
 .storage-line {
     margin: var(--s-1) 0 0;
     color: var(--muted);
