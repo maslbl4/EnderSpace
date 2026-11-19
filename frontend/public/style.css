@@ -248,9 +248,10 @@ body {
 }
 
 /* ----- Main screen ----------------------------------------------------------
-   Header row (brand + actions) over a column of glass cards. */
+   Header row (brand + actions) over a column of glass cards.
+   Без max-width: при расширении окна интерфейс «разъезжается» вместе с ним
+   (карточки и таблица — width:100% внутри). */
 .main {
-    max-width: 860px;
     justify-content: flex-start;      /* top-aligned: data, not a hero */
 }
 .main-head {
