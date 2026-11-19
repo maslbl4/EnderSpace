@@ -45,6 +45,7 @@ type PrinterAPI interface {
 	Info(ctx context.Context) (printer.Info, error)
 	ListFiles(ctx context.Context) ([]printer.RawFile, error)
 	DeleteFile(ctx context.Context, p, name string) error
+	PrintFile(ctx context.Context, p, name string) error
 	DownloadGcode(ctx context.Context, name string) (io.ReadCloser, error)
 	DownloadThumbnail(ctx context.Context, name string) (io.ReadCloser, error)
 	WatchState(ctx context.Context, fn func(*printer.State)) error
@@ -201,6 +202,9 @@ func (a *App) Status() printer.PrinterStatus {
 		// принтера: 1="Printing", 5="Printing Paused" (работа идёт).
 		if s, ok := a.state.Int("state"); ok {
 			st.Printing = s == 1 || s == 5
+			if st.Printing {
+				st.PrintFile, _ = a.state.Str("printFileName")
+			}
 		}
 	}
 	return st
@@ -502,6 +506,15 @@ func (a *App) DeleteFiles(ctx context.Context, paths []string) error {
 	if !ok {
 		return errors.New("принтер не подключён")
 	}
+	// Печататься файл и удаляться не могут одновременно: принтер «держит»
+	// его, и удаление может убить печать. Гвард — на весь список.
+	if p := a.printingFile(); p != "" {
+		for _, target := range paths {
+			if sameFile(p, target) {
+				return fmt.Errorf("нельзя удалить %s: файл сейчас печатается", path.Base(target))
+			}
+		}
+	}
 
 	var firstErr error
 	fail := func(p string, err error) {
@@ -549,6 +562,73 @@ func (a *App) DeleteFiles(ctx context.Context, paths []string) error {
 	// English on purpose: the frontend localizes the report by the numbers.
 	return fmt.Errorf("deleted %d of %d: still on the printer: %v",
 		len(paths)-len(remaining), len(paths), remaining)
+}
+
+// printConfirmTimeout — сколько ждать подтверждения запуска печати
+// (push состояния с printFileName == файл и state ∈ {1,5}). var для тестов.
+var printConfirmTimeout = 30 * time.Second
+
+// printPoll — период опроса состояния при ожидании подтверждения. var для
+// тестов.
+var printPoll = 300 * time.Millisecond
+
+// StartPrint запускает печать одного файла (full — «<path>/<name>») и ждёт
+// подтверждения: принтер, как и с deleteprt, не шлёт ack на printprt —
+// подтверждением служит push состояния, где printFileName совпал с файлом
+// и state ∈ {1,5} («Printing»/«Paused»).
+func (a *App) StartPrint(ctx context.Context, full string) error {
+	client, ok := a.activeClient()
+	if !ok {
+		return errors.New("принтер не подключён")
+	}
+	if p := a.printingFile(); p != "" {
+		return fmt.Errorf("принтер уже печатает: %s", p)
+	}
+	dir, name := path.Split(full) // dir всегда с завершающим "/"
+	if err := client.PrintFile(ctx, strings.TrimSuffix(dir, "/"), name); err != nil {
+		return err
+	}
+	deadline := time.Now().Add(printConfirmTimeout)
+	for time.Now().Before(deadline) {
+		if a.printingFile() == full {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(printPoll):
+		}
+	}
+	return errors.New("печать не подтвердилась: принтер не перешёл в статус «Печатает»")
+}
+
+// printingFile — полный путь печатающегося сейчас файла (из printFileName)
+// или "" — принтер не печатает. printFileName остаётся с прошлой печати,
+// поэтому доверять ему можно только при state ∈ {1,5}.
+func (a *App) printingFile() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.state == nil {
+		return ""
+	}
+	st, ok := a.state.Int("state")
+	if !ok || (st != 1 && st != 5) {
+		return ""
+	}
+	f, _ := a.state.Str("printFileName")
+	return f
+}
+
+// sameFile — одно и то же ли это: полные пути равны или равны basename
+// (путь из WS-списка и printFileName могут отличаться префиксом).
+func sameFile(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return path.Base(a) == path.Base(b)
 }
 
 // activeClient возвращает активный клиент; ok=false — если не подключены.

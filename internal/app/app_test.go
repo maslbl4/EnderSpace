@@ -28,6 +28,8 @@ type mockPrinter struct {
 	listLag     int               // файл исчезает из списка через N вызовов ListFiles (0 — сразу)
 	pendingDel  map[string]int    // "path|name" → остаток вызовов ListFiles до исчезновения
 	deleted     []string
+	printed     []string    // "path/name" → ушедшие printprt
+	statePush   chan string // сырой JSON состояния; WatchState пушит в наблюдателя
 }
 
 func (m *mockPrinter) Info(ctx context.Context) (printer.Info, error) {
@@ -78,6 +80,28 @@ func (m *mockPrinter) DeleteFile(ctx context.Context, path, name string) error {
 	return nil
 }
 
+func (m *mockPrinter) PrintFile(ctx context.Context, path, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.printed = append(m.printed, path+"/"+name)
+	return nil
+}
+
+// printedCount / printedList — чтение m.printed под мьютексом.
+func (m *mockPrinter) printedCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.printed)
+}
+
+func (m *mockPrinter) printedList() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, len(m.printed))
+	copy(out, m.printed)
+	return out
+}
+
 // removeFile — исключает «path|name» из m.files (вызывать под m.mu).
 func (m *mockPrinter) removeFile(pathName string) {
 	out := m.files[:0]
@@ -121,10 +145,24 @@ func (m *mockPrinter) DownloadThumbnail(ctx context.Context, name string) (io.Re
 	return io.NopCloser(bytes.NewReader(body)), nil
 }
 
-// WatchState в тестах молчит (флаги состояния не проверяем).
+// WatchState: без statePush молчит (большинство тестов состояние не
+// проверяют); с каналом — пушит туда присланный JSON как push-сообщения.
 func (m *mockPrinter) WatchState(ctx context.Context, fn func(*printer.State)) error {
-	<-ctx.Done()
-	return ctx.Err()
+	if m.statePush == nil {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	st := printer.NewState()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case raw := <-m.statePush:
+			if err := st.Merge([]byte(raw)); err == nil {
+				fn(st)
+			}
+		}
+	}
 }
 
 func newTestApp(t *testing.T, m *mockPrinter) *App {
@@ -338,6 +376,137 @@ func TestDeleteFilesDelayedProcessing(t *testing.T) {
 	}
 }
 
+// fastPrintConfirm — сокращает ожидание подтверждения запуска печати в тестах.
+func fastPrintConfirm(t *testing.T) {
+	t.Helper()
+	oldTO, oldPoll := printConfirmTimeout, printPoll
+	printConfirmTimeout = 500 * time.Millisecond
+	printPoll = 10 * time.Millisecond
+	t.Cleanup(func() { printConfirmTimeout, printPoll = oldTO, oldPoll })
+}
+
+// waitStatus — ждёт, пока состояние из statePush не дойдёт до App.Status.
+func waitStatus(t *testing.T, app *App, want func(printer.PrinterStatus) bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if want(app.Status()) {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("Status не достигло нужного состояния: %v", app.Status())
+}
+
+// StartPrint: принтер «запустил» печать (state=1, printFileName совпал) —
+// успех, printprt ушёл ровно один раз.
+func TestStartPrintHappyPath(t *testing.T) {
+	fastPrintConfirm(t)
+	m := &mockPrinter{infoOK: true, statePush: make(chan string, 8)}
+	app := newTestApp(t, m)
+	if err := app.Connect(context.Background(), "192.168.3.166"); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(func() { _ = app.Disconnect() })
+
+	const full = "/p/a.gcode"
+	// Принтер подтверждает запуск пушем состояния после printprt.
+	go func() {
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if m.printedCount() > 0 {
+				m.statePush <- `{"state":1,"printFileName":"/p/a.gcode"}`
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+
+	if err := app.StartPrint(context.Background(), full); err != nil {
+		t.Fatalf("StartPrint: %v", err)
+	}
+	if got := m.printedList(); len(got) != 1 || got[0] != full {
+		t.Errorf("printed = %v, want [%s]", got, full)
+	}
+}
+
+// Принтер уже печатает другой файл — StartPrint отказывается, printprt
+// не отправляется.
+func TestStartPrintRejectsWhilePrinting(t *testing.T) {
+	fastPrintConfirm(t)
+	m := &mockPrinter{infoOK: true, statePush: make(chan string, 8)}
+	app := newTestApp(t, m)
+	if err := app.Connect(context.Background(), "192.168.3.166"); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(func() { _ = app.Disconnect() })
+
+	m.statePush <- `{"state":1,"printFileName":"/p/other.gcode"}`
+	waitStatus(t, app, func(st printer.PrinterStatus) bool { return st.Printing })
+	if st := app.Status(); st.PrintFile != "/p/other.gcode" {
+		t.Errorf("Status().PrintFile = %q, want /p/other.gcode", st.PrintFile)
+	}
+
+	if err := app.StartPrint(context.Background(), "/p/a.gcode"); err == nil {
+		t.Fatal("ожидалась ошибка: принтер уже печатает")
+	}
+	if got := m.printedList(); len(got) != 0 {
+		t.Errorf("printprt не должен был уйти, printed = %v", got)
+	}
+}
+
+// printprt ушёл, но состояние не меняется — честный таймаут подтверждения.
+func TestStartPrintNoConfirmTimeout(t *testing.T) {
+	fastPrintConfirm(t)
+	m := &mockPrinter{infoOK: true, statePush: make(chan string, 8)}
+	app := newTestApp(t, m)
+	if err := app.Connect(context.Background(), "192.168.3.166"); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(func() { _ = app.Disconnect() })
+
+	start := time.Now()
+	if err := app.StartPrint(context.Background(), "/p/a.gcode"); err == nil {
+		t.Fatal("ожидалась ошибка: печать не подтвердилась")
+	} else if time.Since(start) < 400*time.Millisecond {
+		t.Errorf("стало ошибкой за %s — подтверждать не ждали", time.Since(start))
+	}
+	if got := m.printedList(); len(got) != 1 {
+		t.Errorf("printprt был отправлен, printed = %v", got)
+	}
+}
+
+// Файл, который сейчас печатается, удалить нельзя: deleteprt не уходит.
+func TestDeleteFilesRejectsPrintingFile(t *testing.T) {
+	fastDeletes(t)
+	m := &mockPrinter{
+		infoOK:    true,
+		statePush: make(chan string, 8),
+		files: []printer.RawFile{
+			{Path: "/p", Name: "a.gcode", Size: 100},
+			{Path: "/p", Name: "b.gcode", Size: 200},
+		},
+	}
+	app := newTestApp(t, m)
+	if err := app.Connect(context.Background(), "192.168.3.166"); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(func() { _ = app.Disconnect() })
+
+	m.statePush <- `{"state":1,"printFileName":"/p/a.gcode"}`
+	waitStatus(t, app, func(st printer.PrinterStatus) bool { return st.Printing })
+
+	if err := app.DeleteFiles(context.Background(), []string{"/p/a.gcode"}); err == nil {
+		t.Fatal("ожидалась ошибка: файл сейчас печатается")
+	}
+	m.mu.Lock()
+	deleted := len(m.deleted)
+	m.mu.Unlock()
+	if deleted != 0 {
+		t.Errorf("deleteprt не должен был уйти, удалено %d", deleted)
+	}
+}
+
 // b.gcode принтер «не слышит» (WS-отказ) и файл остаётся в списке:
 // после всех раундов — честный отчёт «deleted 1 of 2».
 func TestDeleteFilesStillPresent(t *testing.T) {
@@ -511,6 +680,9 @@ func (c *countingDownloader) ListFiles(ctx context.Context) ([]printer.RawFile, 
 }
 func (c *countingDownloader) DeleteFile(ctx context.Context, path, name string) error {
 	return c.m.DeleteFile(ctx, path, name)
+}
+func (c *countingDownloader) PrintFile(ctx context.Context, path, name string) error {
+	return c.m.PrintFile(ctx, path, name)
 }
 func (c *countingDownloader) DownloadGcode(ctx context.Context, name string) (io.ReadCloser, error) {
 	if c.n != nil {

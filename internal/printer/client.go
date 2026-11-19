@@ -217,6 +217,24 @@ func (c *Client) DeleteFile(ctx context.Context, path, name string) error {
 	return conn.WriteMessage(websocket.TextMessage, msg)
 }
 
+// PrintFile — WS set opGcodeFile "printprt:<path>/<name>": запускает печать
+// файла (та же операция, которой управляет веб-UI принтера). Ack нет —
+// подтверждение запуска приходит в пушах состояния (printFileName + state),
+// им занимается слой приложения.
+func (c *Client) PrintFile(ctx context.Context, path, name string) error {
+	conn, err := c.dial(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	op := "printprt:" + path + "/" + name
+	msg, _ := json.Marshal(map[string]any{
+		"method": "set",
+		"params": map[string]any{"opGcodeFile": op},
+	})
+	return conn.WriteMessage(websocket.TextMessage, msg)
+}
+
 // DownloadGcode — GET /downloads/gcode/<name> (стриминг, весь файл).
 // Имя экранируется: в названиях бывают пробелы и кириллица.
 func (c *Client) DownloadGcode(ctx context.Context, name string) (io.ReadCloser, error) {

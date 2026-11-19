@@ -49,6 +49,7 @@ type PrinterStatus struct {
 	IP        string
 	Connected bool
 	Printing  bool   // принтер сейчас печатает (если API сообщает)
+	PrintFile string // полный путь печатающегося файла ("" — не печатает)
 	Model     string // код модели, например "F005"
 }
 

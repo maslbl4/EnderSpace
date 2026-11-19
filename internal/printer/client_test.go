@@ -219,6 +219,26 @@ func TestDeleteFile(t *testing.T) {
 	t.Fatalf("сервер не получил deleteprt-операцию; получено: %v", tp.receivedMsgs())
 }
 
+func TestPrintFile(t *testing.T) {
+	tp := newTestPrinter(t)
+	path := "/usr/data/printer_data/gcodes"
+	if err := tp.client().PrintFile(context.Background(), path, "a.gcode"); err != nil {
+		t.Fatalf("PrintFile: %v", err)
+	}
+	// Как с deleteprt: ack нет, клиент закрывает WS сразу после отправки —
+	// поллинг с дедлайном.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, m := range tp.receivedMsgs() {
+			if strings.Contains(m, `"printprt:`+path+`/a.gcode"`) {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("сервер не получил printprt-операцию; получено: %v", tp.receivedMsgs())
+}
+
 func TestDownloadGcode(t *testing.T) {
 	tp := newTestPrinter(t)
 	rc, err := tp.client().DownloadGcode(context.Background(), "a.gcode")
