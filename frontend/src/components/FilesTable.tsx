@@ -154,19 +154,19 @@ export default function FilesTable({
                   {t('colName')}
                   {arrow('name')}
                 </th>
-                <th className="sortable num" onClick={() => toggleSort('size')}>
+                <th className="sortable num col-size" onClick={() => toggleSort('size')}>
                   {t('colSize')}
                   {arrow('size')}
                 </th>
-                <th className="sortable" onClick={() => toggleSort('date')}>
+                <th className="sortable col-date" onClick={() => toggleSort('date')}>
                   {t('colDate')}
                   {arrow('date')}
                 </th>
-                <th className="sortable num" onClick={() => toggleSort('time')}>
+                <th className="sortable num col-time" onClick={() => toggleSort('time')}>
                   {t('colTime')}
                   {arrow('time')}
                 </th>
-                <th className="sortable num" onClick={() => toggleSort('plastic')}>
+                <th className="sortable num col-plastic" onClick={() => toggleSort('plastic')}>
                   {t('colPlastic')}
                   {arrow('plastic')}
                 </th>

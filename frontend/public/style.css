@@ -503,6 +503,9 @@ body {
 }
 .files-table {
     width: 100%;
+    /* Фиксированная раскладка: узкие колонки не расползаются при широком
+       окне, лишняя ширина целиком уходит в колонку «Имя». */
+    table-layout: fixed;
     border-collapse: collapse;
     font-size: 14px;
 }
@@ -690,7 +693,6 @@ body {
     z-index: 1000;
 }
 .files-table .name {
-    max-width: 320px;
     overflow: hidden;
     text-overflow: ellipsis;
     -webkit-user-select: text;
@@ -698,6 +700,12 @@ body {
 }
 .files-table .sortable { cursor: pointer; user-select: none; }
 .files-table .col-check { width: 34px; }
+/* Колонки с фиксированной шириной (table-layout: fixed): ширина задаётся
+   в заголовке, колонка «Имя» забирает остаток. */
+.files-table .col-size { width: 110px; }
+.files-table .col-date { width: 100px; }
+.files-table .col-time { width: 100px; }
+.files-table .col-plastic { width: 110px; }
 
 /* Loading skeleton + empty state. */
 .skeleton { display: flex; flex-direction: column; gap: 10px; }
