@@ -4,6 +4,8 @@ package gcode
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/base64"
 	"io"
 	"math"
 	"regexp"
@@ -11,11 +13,12 @@ import (
 	"strings"
 )
 
-// Info — что удалось вытащить из G-кода. Nil — маркер «не найдено» (UI: «—»).
+// Info — что удалось вытащить из G-кода. Nil/пустое — «не найдено» (UI: «—»).
 type Info struct {
 	TimeSeconds   *int
 	FilamentGrams *float64
 	Density       *float64 // из «; filament_density: …» (г/см³)
+	Thumb         []byte   // PNG-превью (слайсер встраивает в заголовок; берём крупнейший)
 }
 
 // Параметры пересчёта «мм филамента → граммы» (фолбэк, когда слайсер не
@@ -40,6 +43,9 @@ var (
 	reMM = regexp.MustCompile(`;\s*filament used \[mm\]\s*=\s*(\d+(?:\.\d+)?)`)
 	// OrcaSlicer: «; filament_density: 1.24»
 	reDensity = regexp.MustCompile(`;\s*filament_density:\s*(\d+(?:\.\d+)?)`)
+	// Первая настоящая команда G-кода — тело началось, заголовок (и все
+	// вложенные превью) уже прочитаны.
+	reGcodeCmd = regexp.MustCompile(`^[GM]\d`)
 )
 
 // Parse читает G-код потоково (строкa за строкой, без загрузки файла в
@@ -53,12 +59,39 @@ func Parse(r io.Reader) (Info, error) {
 		mm           float64
 		densityFound bool
 		density      float64
+		// Превью: слайсер встраивает PNG base64 в заголовок блоками
+		// «; thumbnail begin WxH N … ; thumbnail end» (обычно два: 96×96
+		// и 300×300). Храним крупнейший.
+		inThumb  bool
+		thumbBuf []byte
 	)
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for sc.Scan() {
 		line := strings.TrimRight(sc.Text(), "\r")
+
+		// Блоки превью обрабатываем отдельным состоянием.
+		switch {
+		case strings.HasPrefix(line, "; thumbnail begin"):
+			inThumb = true
+			thumbBuf = thumbBuf[:0]
+		case inThumb && strings.HasPrefix(line, "; thumbnail end"):
+			inThumb = false
+			if b, err := base64.StdEncoding.DecodeString(string(thumbBuf)); err == nil && len(b) > len(info.Thumb) {
+				info.Thumb = b
+			}
+		case inThumb && strings.HasPrefix(line, ";"):
+			thumbBuf = append(thumbBuf, bytes.TrimSpace([]byte(strings.TrimPrefix(line, ";")))...)
+		}
+		if inThumb {
+			continue // base64-строки не гоняем через регулярки
+		}
+
+		// Тело G-кода началось — всё нужное уже в заголовке.
+		if reGcodeCmd.MatchString(line) {
+			break
+		}
 
 		if info.TimeSeconds == nil {
 			if v, ok := matchTime(reTimeOrca, line); ok {
@@ -85,10 +118,6 @@ func Parse(r io.Reader) (Info, error) {
 				densityFound = true
 				info.Density = &f
 			}
-		}
-		// Всё нужное в заголовке собрано — не гоняем регулярки по телу.
-		if info.TimeSeconds != nil && (info.FilamentGrams != nil || (mmFound && densityFound)) {
-			break
 		}
 	}
 	if err := sc.Err(); err != nil {

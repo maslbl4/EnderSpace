@@ -1,12 +1,15 @@
 // Роутинг состояний: нет подключения → ConnectionScreen, есть → основной экран.
-// Основной экран: память + таблица файлов грузятся сразу после подключения.
-import { useCallback, useEffect, useState } from 'react';
+// Основной экран: память + таблица файлов грузятся сразу после подключения;
+// выбор файлов (чекбоксы) → подтверждение → удаление → авто-refresh.
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import ConnectionScreen from './components/ConnectionScreen';
-import FilesTable from './components/FilesTable';
+import ConfirmDialog from './components/ConfirmDialog';
+import FilesTable, { fileKey } from './components/FilesTable';
 import StorageCard from './components/StorageCard';
 import { t } from './i18n';
 import { api } from './lib/api';
 import type { FileMeta, PrinterStatus, Storage } from './lib/api';
+import { formatBytes, plural } from './lib/format';
 import { modelName } from './lib/model';
 
 function App() {
@@ -23,10 +26,15 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
   const [storage, setStorage] = useState<Storage | null>(null);
   const [files, setFiles] = useState<FileMeta[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   const loading = files === null && !loadError;
 
   // Память и список файлов параллельно; ошибка — баннер с «Повторить».
+  // После перезагрузки выбор обрезаем до существующих файлов.
   const load = useCallback(async () => {
     setLoadError(null);
     setFiles(null);
@@ -34,6 +42,10 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
       const [st, fl] = await Promise.all([api.storage(), api.listFiles()]);
       setStorage(st);
       setFiles(fl);
+      setSelected((prev) => {
+        const keys = new Set(fl.map(fileKey));
+        return new Set([...prev].filter((k) => keys.has(k)));
+      });
     } catch (err: unknown) {
       setFiles(null);
       setLoadError(err instanceof Error ? err.message : String(err));
@@ -73,6 +85,15 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Тост гаснет сам.
+  useEffect(() => {
+    if (!toast) {
+      return;
+    }
+    const id = setTimeout(() => setToast(null), 8000);
+    return () => clearTimeout(id);
+  }, [toast]);
+
   const disconnect = () => {
     api
       .disconnect()
@@ -80,11 +101,61 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
       .finally(onDisconnected);
   };
 
+  const toggle = (k: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) {
+        next.delete(k);
+      } else {
+        next.add(k);
+      }
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    setSelected((prev) =>
+      prev.size === (files?.length ?? 0) ? new Set<string>() : new Set((files ?? []).map(fileKey)),
+    );
+  };
+
+  const selectedList = useMemo(
+    () => (files ?? []).filter((f) => selected.has(fileKey(f))),
+    [files, selected],
+  );
+  const selectedBytes = selectedList.reduce((s, f) => s + f.Size, 0);
+
   const printing = !!status?.Printing;
-  const label =
-    status?.IP
-      ? `${modelName(status.Model)} · ${status.IP}`
-      : t('connectSubtitle');
+
+  // Удаление: бэкенд шлёт «deleted k of n: …» при частичном сбое —
+  // по числам локализируем отчёт; полный успех — молча refresh.
+  const doDelete = async () => {
+    const targets = selectedList.map(fileKey);
+    setDeleting(true);
+    try {
+      await api.deleteFiles(targets);
+      setToast(null);
+      setSelected(new Set());
+      setConfirmOpen(false);
+      load();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const m = /deleted (\d+) of (\d+)/.exec(msg);
+      if (m) {
+        setToast(t('deletedPartial').replace('%d', m[1]).replace('%d', m[2]));
+      } else {
+        setToast(`${t('deleteFailed')}${msg}`);
+      }
+      setConfirmOpen(false);
+      load();
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const label = status?.IP
+    ? `${modelName(status.Model)} · ${status.IP}`
+    : t('connectSubtitle');
 
   return (
     <main className="container main">
@@ -131,7 +202,50 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
         </div>
       ) : null}
 
-      <FilesTable files={files ?? []} loading={loading} />
+      <FilesTable
+        files={files ?? []}
+        loading={loading}
+        selected={selected}
+        onToggle={toggle}
+        onToggleAll={toggleAll}
+      />
+
+      {files !== null && !loading ? (
+        <div className="footer-bar">
+          <span className="footer-info">
+            {t('selected')}: {selectedList.length}{' '}
+            {plural(selectedList.length, ['файл', 'файла', 'файлов'])}
+            {selectedList.length > 0 ? ` · ${formatBytes(selectedBytes)}` : ''}
+          </span>
+          <button
+            className="btn btn-danger"
+            disabled={selectedList.length === 0 || printing || deleting}
+            title={printing ? t('printingBanner') : undefined}
+            onClick={() => setConfirmOpen(true)}
+          >
+            {t('deleteSelected')}
+          </button>
+        </div>
+      ) : null}
+
+      {confirmOpen ? (
+        <ConfirmDialog
+          names={selectedList.map((f) => f.Name)}
+          bytes={selectedBytes}
+          deleting={deleting}
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={doDelete}
+        />
+      ) : null}
+
+      {toast ? (
+        <div className="toast" role="status">
+          <span className="banner-text">{toast}</span>
+          <button className="btn btn-small" onClick={() => setToast(null)}>
+            ×
+          </button>
+        </div>
+      ) : null}
     </main>
   );
 }

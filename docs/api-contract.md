@@ -102,6 +102,21 @@ Content-Type: application/octet-stream
 (`{"nozzleTemp":"210.43","printJobTime":5368,"curPosition":"X:.. Y:.. Z:.."}`
 и т.п.). Клиент должен мерджить дельты в накопленное состояние.
 
+Поле `state` — статус работы (индекс в `statusArr` UI принтера, из бандла
+`/static/js/app.*.js`):
+
+| state | statusArr | Значение |
+|---|---|---|
+| 0 | Printing stopped | остановлен (простой) |
+| 1 | Printing | печатает |
+| 2 | printing complete | завершено |
+| 3 | Printing failed | сбой |
+| 4 | print abort | прервано |
+| 5 | Printing Paused | пауза (работа ещё идёт) |
+
+ВНИМАНИЕ: `printFileName` **остаётся с прошлой печати** и в простое —
+метку «печатает» давать только по `state ∈ {1, 5}`.
+
 ## Хранение (eMMC)
 
 Эндпоинтов df/storage **нет** (проверено: `/info` и `/printer` ничего не

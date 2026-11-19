@@ -153,8 +153,11 @@ func (a *App) Status() printer.PrinterStatus {
 	defer a.mu.Unlock()
 	st := printer.PrinterStatus{IP: a.ip, Connected: a.connected, Model: a.model}
 	if a.state != nil {
-		if name, ok := a.state.Str("printFileName"); ok && name != "" {
-			st.Printing = true
+		// «Печатает» только по полю state: printFileName остаётся с прошлой
+		// печати и в простое даёт ложную метку. Значения — из statusArr UI
+		// принтера: 1="Printing", 5="Printing Paused" (работа идёт).
+		if s, ok := a.state.Int("state"); ok {
+			st.Printing = s == 1 || s == 5
 		}
 	}
 	return st
@@ -239,7 +242,7 @@ func (a *App) enrich(ctx context.Context, client PrinterAPI, rf printer.RawFile)
 	}
 	fm.PrintTime = info.TimeSeconds
 	fm.Filament = info.FilamentGrams
-	fm.Thumb = a.thumb(ctx, client, rf)
+	fm.Thumb = a.thumb(ctx, client, rf, info)
 	return fm
 }
 
@@ -259,9 +262,10 @@ func downloadHead(ctx context.Context, client PrinterAPI, name string) gcode.Inf
 	return parsed
 }
 
-// thumb — data URI превью файла из кэша или скачивания. Ошибка/отсутствие
-// превью — пустая строка (UI показывает заглушку).
-func (a *App) thumb(ctx context.Context, client PrinterAPI, rf printer.RawFile) string {
+// thumb — data URI превью файла. Источники: вложенный в G-код PNG
+// (300×300, качество слайсера) → GET /downloads/humbnail (96×96).
+// Ошибка/отсутствие — пустая строка (UI показывает заглушку).
+func (a *App) thumb(ctx context.Context, client PrinterAPI, rf printer.RawFile, info gcode.Info) string {
 	key := rf.Path + "|" + rf.Name
 	a.mu.Lock()
 	v, ok := a.thumbCache[key]
@@ -270,7 +274,9 @@ func (a *App) thumb(ctx context.Context, client PrinterAPI, rf printer.RawFile) 
 		return v
 	}
 	v = ""
-	if rc, err := client.DownloadThumbnail(ctx, rf.Name); err == nil {
+	if len(info.Thumb) > 0 {
+		v = "data:image/png;base64," + base64.StdEncoding.EncodeToString(info.Thumb)
+	} else if rc, err := client.DownloadThumbnail(ctx, rf.Name); err == nil {
 		b, rerr := io.ReadAll(io.LimitReader(rc, thumbLimit))
 		rc.Close()
 		if rerr == nil {

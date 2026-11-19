@@ -1,23 +1,31 @@
-// Таблица файлов: превью / имя / размер / время / пластик.
+// Таблица файлов: чекбокс / превью / имя / размер / время / пластик.
 // «—» — значение не найдено (всегда в конце сортировки); сортировка по
 // всем колонкам; скелетон во время загрузки; зум превью при наведении.
-// Чекбоксы — функционал Task 9.
 import { useMemo, useState } from 'react';
 import { t } from '../i18n';
 import type { FileMeta } from '../lib/api';
 import { formatBytes, formatDuration, formatGrams } from '../lib/format';
 
+// fileKey — идентичность файла для выбора (удаление работает по этим путям).
+export const fileKey = (f: FileMeta) => f.Path + '/' + f.Name;
+
 type SortKey = 'name' | 'size' | 'time' | 'plastic';
 
-// zoom — увеличенное превью: позиция = центр наведённой миниатюры.
-type Zoom = { src: string; x: number; y: number };
+// zoom — увеличенное превью (по центру окна, позиция в CSS).
+type Zoom = { src: string };
 
 export default function FilesTable({
   files,
   loading,
+  selected,
+  onToggle,
+  onToggleAll,
 }: {
   files: FileMeta[];
   loading: boolean;
+  selected: ReadonlySet<string>;
+  onToggle: (key: string) => void;
+  onToggleAll: () => void;
 }) {
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [sortAsc, setSortAsc] = useState(true);
@@ -55,10 +63,9 @@ export default function FilesTable({
   const arrow = (key: SortKey) =>
     sortKey === key ? (sortAsc ? ' ↑' : ' ↓') : '';
 
-  const showZoom = (src: string, e: React.MouseEvent<HTMLImageElement>) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    setZoom({ src, x: r.left + r.width / 2, y: r.top + r.height / 2 });
-  };
+  const showZoom = (src: string) => setZoom({ src, x: 0, y: 0 });
+
+  const allChecked = files.length > 0 && selected.size === files.length;
 
   // Зум-элемент вне <section>: .card использует backdrop-filter, что делает
   // её containing block для position: fixed (координаты бы «поехали»).
@@ -82,7 +89,16 @@ export default function FilesTable({
           <table className="files-table">
             <thead>
               <tr>
-                <th className="col-check" aria-hidden />
+                <th className="col-check">
+                  <input
+                    type="checkbox"
+                    className="checkbox"
+                    title={t('selectAll')}
+                    aria-label={t('selectAll')}
+                    checked={allChecked}
+                    onChange={onToggleAll}
+                  />
+                </th>
                 <th className="col-thumb" aria-hidden />
                 <th className="sortable" onClick={() => toggleSort('name')}>
                   {t('colName')}
@@ -103,35 +119,45 @@ export default function FilesTable({
               </tr>
             </thead>
             <tbody>
-              {sorted.map((f) => (
-                <tr key={f.Path + '/' + f.Name}>
-                  <td className="col-check" />
-                  <td className="col-thumb">
-                    {f.Thumb ? (
-                      <img
-                        className="thumb"
-                        src={f.Thumb}
-                        alt=""
-                        loading="lazy"
-                        decoding="async"
-                        onMouseEnter={(e) => showZoom(f.Thumb, e)}
+              {sorted.map((f) => {
+                const k = fileKey(f);
+                return (
+                  <tr key={k} className={selected.has(k) ? 'selected' : ''}>
+                    <td className="col-check">
+                      <input
+                        type="checkbox"
+                        className="checkbox"
+                        checked={selected.has(k)}
+                        onChange={() => onToggle(k)}
                       />
-                    ) : (
-                      <span className="thumb thumb-none" aria-hidden />
-                    )}
-                  </td>
-                  <td className="name" title={f.Name}>
-                    {f.Name}
-                  </td>
-                  <td className="num">{formatBytes(f.Size)}</td>
-                  <td className="num">
-                    {f.PrintTime != null ? formatDuration(f.PrintTime) : '—'}
-                  </td>
-                  <td className="num">
-                    {f.Filament != null ? formatGrams(f.Filament) : '—'}
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="col-thumb">
+                      {f.Thumb ? (
+                        <img
+                          className="thumb"
+                          src={f.Thumb}
+                          alt=""
+                          loading="lazy"
+                          decoding="async"
+                          onMouseEnter={() => showZoom(f.Thumb)}
+                        />
+                      ) : (
+                        <span className="thumb thumb-none" aria-hidden />
+                      )}
+                    </td>
+                    <td className="name" title={f.Name}>
+                      {f.Name}
+                    </td>
+                    <td className="num">{formatBytes(f.Size)}</td>
+                    <td className="num">
+                      {f.PrintTime != null ? formatDuration(f.PrintTime) : '—'}
+                    </td>
+                    <td className="num">
+                      {f.Filament != null ? formatGrams(f.Filament) : '—'}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -142,7 +168,6 @@ export default function FilesTable({
         className="zoom-thumb"
         src={zoom.src}
         alt=""
-        style={{ left: zoom.x, top: zoom.y }}
         onMouseLeave={() => setZoom(null)}
       />
     ) : null}

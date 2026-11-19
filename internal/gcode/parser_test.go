@@ -1,6 +1,8 @@
 package gcode
 
 import (
+	"bytes"
+	"encoding/base64"
 	"math"
 	"strings"
 	"testing"
@@ -121,6 +123,48 @@ func TestParseEmptyFile(t *testing.T) {
 	info := parseString(t, "")
 	if info.TimeSeconds != nil || info.FilamentGrams != nil {
 		t.Fatalf("пустой файл: TimeSeconds=%v FilamentGrams=%v, want nil/nil", *info.TimeSeconds, *info.FilamentGrams)
+	}
+}
+
+// Два вложенных блока превью (как у OrcaSlicer: 96×96 и 300×300) —
+// берём крупнейший; время из заголовка при этом работает.
+func TestParseThumbnailBlocks(t *testing.T) {
+	small := make([]byte, 100)
+	large := make([]byte, 300)
+	for i := range small {
+		small[i] = byte(i)
+	}
+	for i := range large {
+		large[i] = byte(i)
+	}
+	src := "; HEADER_BLOCK_START\n" +
+		"; estimated printing time (normal mode) = 1h 0m 0s\n" +
+		"; HEADER_BLOCK_END\n" +
+		"; THUMBNAIL_BLOCK_START\n;\n" +
+		"; thumbnail begin 96x96 80\n" +
+		"; " + base64.StdEncoding.EncodeToString(small) + "\n" +
+		"; thumbnail end\n" +
+		"; THUMBNAIL_BLOCK_END\n" +
+		"; THUMBNAIL_BLOCK_START\n;\n" +
+		"; thumbnail begin 300x300 400\n" +
+		"; " + base64.StdEncoding.EncodeToString(large) + "\n" +
+		"; thumbnail end\n" +
+		"; THUMBNAIL_BLOCK_END\n" +
+		"G28\nG1 X10 Y10\n"
+	info := parseString(t, src)
+	if !bytes.Equal(info.Thumb, large) {
+		t.Fatalf("Thumb = %d байт, want крупнейший блок (%d байт)", len(info.Thumb), len(large))
+	}
+	if info.TimeSeconds == nil || *info.TimeSeconds != 3600 {
+		t.Errorf("TimeSeconds = %v, want 3600", info.TimeSeconds)
+	}
+}
+
+// Файл без блоков превью — Thumb пусто, остальное парсится.
+func TestParseNoThumbnail(t *testing.T) {
+	info := parseString(t, "; estimated printing time (normal mode) = 1h 0m 0s\nG28\n")
+	if len(info.Thumb) != 0 {
+		t.Errorf("Thumb = %d байт, want 0", len(info.Thumb))
 	}
 }
 

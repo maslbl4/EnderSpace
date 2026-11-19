@@ -218,6 +218,37 @@ func TestConnectFailsWhenPrinterUnreachable(t *testing.T) {
 	}
 }
 
+// «Печатает» только по полю state (1=печать, 5=пауза); остаточный
+// printFileName из прошлой печати в простое ложную метку не даёт.
+func TestStatusPrintingByState(t *testing.T) {
+	m := &mockPrinter{infoOK: true}
+	app := newTestApp(t, m)
+	app.connected = true
+	app.client = m
+	st := printer.NewState()
+	app.mu.Lock()
+	app.state = st
+	app.mu.Unlock()
+
+	cases := []struct {
+		push string
+		want bool
+		what string
+	}{
+		{`{"state":0,"printFileName":"/p/last.gcode"}`, false, "простой, printFileName остаточный"},
+		{`{"state":1}`, true, "печать"},
+		{`{"state":5}`, true, "пауза (работа ещё идёт)"},
+		{`{"state":2}`, false, "завершено"},
+		{`{"state":3}`, false, "сбой"},
+	}
+	for _, c := range cases {
+		_ = st.Merge([]byte(c.push))
+		if got := app.Status().Printing; got != c.want {
+			t.Errorf("push %s: Printing = %v, want %v (%s)", c.push, got, c.want, c.what)
+		}
+	}
+}
+
 func TestStorageSumsSizes(t *testing.T) {
 	m := &mockPrinter{
 		files: []printer.RawFile{

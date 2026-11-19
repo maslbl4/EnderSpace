@@ -28,6 +28,17 @@ const ru = {
   colTime: 'Время',
   colPlastic: 'Пластик',
   memoryEmpty: 'Память пуста',
+  selectAll: 'Выбрать все',
+  selected: 'Выбрано',
+  deleteSelected: 'Удалить выбранные',
+  deleteTitle: 'Удалить файлы с принтера?',
+  deleteFree: 'Освободится %s. Отменить нельзя.',
+  deleteCancel: 'Отмена',
+  deleteDelete: 'Удалить',
+  deleting: 'Удаление…',
+  deletedPartial: 'Удалено %d из %d файлов. Повторите удаление.',
+  deleteFailed: 'Не удалось удалить: ',
+  moreFiles: '…ещё %d',
 } as const;
 
 export type I18nKey = keyof typeof ru;
