@@ -50,6 +50,11 @@ export interface PrinterStatus {
     "Printing": boolean;
 
     /**
+     * полный путь печатающегося файла ("" — не печатает)
+     */
+    "PrintFile": string;
+
+    /**
      * код модели, например "F005"
      */
     "Model": string;

@@ -15,4 +15,6 @@ export const api = {
   // Go отдаёт nil, если список не получился, — для UI это пустой список.
   listFiles: async (): Promise<FileMeta[]> => (await app.ListFiles()) ?? [],
   deleteFiles: (paths: string[]): Promise<void> => app.DeleteFiles(paths),
+  // full — «<path>/<name>»; бэкенд ждёт подтверждения запуска по статусу.
+  startPrint: (full: string): Promise<void> => app.StartPrint(full),
 };

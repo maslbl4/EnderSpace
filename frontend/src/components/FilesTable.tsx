@@ -18,12 +18,14 @@ export default function FilesTable({
   files,
   loading,
   selected,
+  printingName,
   onToggle,
   onToggleAll,
 }: {
   files: FileMeta[];
   loading: boolean;
   selected: ReadonlySet<string>;
+  printingName?: string; // basename печатающегося файла ("" — нет)
   onToggle: (key: string) => void;
   onToggleAll: () => void;
 }) {
@@ -190,6 +192,9 @@ export default function FilesTable({
                     </td>
                     <td className="name" title={f.Name}>
                       {f.Name}
+                      {printingName === f.Name ? (
+                        <span className="chip-printing">{t('rowPrinting')}</span>
+                      ) : null}
                     </td>
                     <td className="num">{formatBytes(f.Size)}</td>
                     <td className="num">

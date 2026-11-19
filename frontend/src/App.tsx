@@ -10,7 +10,7 @@ import StorageCard from './components/StorageCard';
 import { plural, t, useI18n } from './i18n';
 import { api } from './lib/api';
 import type { FileMeta, PrinterStatus, Storage } from './lib/api';
-import { formatBytes } from './lib/format';
+import { formatBytes, formatDuration, formatGrams } from './lib/format';
 import { modelName } from './lib/model';
 import LangToggle from './components/LangToggle';
 
@@ -44,6 +44,8 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   // Фаза 2: null — обогащение не идёт, иначе {Done, Total} из событий.
   const [enrichProgress, setEnrichProgress] = useState<EnrichProgress | null>(null);
@@ -175,6 +177,41 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
   const selectedBytes = selectedList.reduce((s, f) => s + f.Size, 0);
 
   const printing = !!status?.Printing;
+  // Печатается ли выбранный файл (printFileName из состояния, по basename):
+  // его нельзя удалить/запускать повторно.
+  const printingName = status?.PrintFile ? status.PrintFile.split('/').pop() ?? '' : '';
+  const selectedHasPrinting = selectedList.some((f) => f.Name === printingName);
+
+  // Печать: ровно один выбранный файл.
+  const printTarget = selectedList.length === 1 ? selectedList[0] : null;
+  const printEstimate = printTarget
+    ? [
+        printTarget.PrintTime != null ? formatDuration(printTarget.PrintTime) : null,
+        printTarget.Filament != null ? formatGrams(printTarget.Filament) : null,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : '';
+
+  const doStartPrint = async () => {
+    if (!printTarget) {
+      return;
+    }
+    setStarting(true);
+    try {
+      await api.startPrint(`${printTarget.Path}/${printTarget.Name}`);
+      setPrintOpen(false);
+      setToast(t('printStarted'));
+      // load() не вызываем: статус «печатает» придёт через опрос состояния,
+      // а перезагрузка списка заново запустила бы фазу обогащения.
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setPrintOpen(false);
+      setToast(`${t('printFailed')}${msg}`);
+    } finally {
+      setStarting(false);
+    }
+  };
 
   // Удаление: бэкенд шлёт «deleted k of n: …» при частичном сбое —
   // по числам локализируем отчёт; полный успех — молча refresh.
@@ -286,6 +323,7 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
           files={files}
           loading={false}
           selected={selected}
+          printingName={printingName}
           onToggle={toggle}
           onToggleAll={toggleAll}
         />
@@ -299,9 +337,25 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
             {selectedList.length > 0 ? ` · ${formatBytes(selectedBytes)}` : ''}
           </span>
           <button
-            className="btn btn-danger"
-            disabled={selectedList.length === 0 || printing || deleting}
+            className="btn"
+            disabled={selectedList.length !== 1 || printing || starting || deleting}
             title={printing ? t('printingBanner') : undefined}
+            onClick={() => setPrintOpen(true)}
+          >
+            {t('printSelected')}
+          </button>
+          <button
+            className="btn btn-danger"
+            disabled={
+              selectedList.length === 0 || printing || selectedHasPrinting || deleting
+            }
+            title={
+              printing
+                ? t('printingBanner')
+                : selectedHasPrinting
+                  ? t('deleteBlockedPrinting')
+                  : undefined
+            }
             onClick={() => setConfirmOpen(true)}
           >
             {t('deleteSelected')}
@@ -313,9 +367,21 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
         <ConfirmDialog
           names={selectedList.map((f) => f.Name)}
           bytes={selectedBytes}
-          deleting={deleting}
+          busy={deleting}
           onCancel={() => setConfirmOpen(false)}
           onConfirm={doDelete}
+        />
+      ) : null}
+
+      {printOpen && printTarget ? (
+        <ConfirmDialog
+          kind="print"
+          names={[printTarget.Name]}
+          bytes={printTarget.Size}
+          estimate={printEstimate}
+          busy={starting}
+          onCancel={() => setPrintOpen(false)}
+          onConfirm={doStartPrint}
         />
       ) : null}
 

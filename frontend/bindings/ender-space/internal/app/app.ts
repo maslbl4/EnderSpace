@@ -52,6 +52,16 @@ export function ListFiles(): $CancellablePromise<printer$0.FileMeta[] | null> {
 }
 
 /**
+ * StartPrint запускает печать одного файла (full — «<path>/<name>») и ждёт
+ * подтверждения: принтер, как и с deleteprt, не шлёт ack на printprt —
+ * подтверждением служит push состояния, где printFileName совпал с файлом
+ * и state ∈ {1,5} («Printing»/«Paused»).
+ */
+export function StartPrint(full: string): $CancellablePromise<void> {
+    return $Call.ByID(56200444, full);
+}
+
+/**
  * Status — текущее состояние подключения.
  */
 export function Status(): $CancellablePromise<printer$0.PrinterStatus> {

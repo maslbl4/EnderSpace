@@ -325,6 +325,19 @@ body {
     border-color: rgba(255, 176, 32, 0.35);
 }
 
+/* Chip «печатает» рядом с именем строки (та же янтарная палитра, что у badge-warn). */
+.chip-printing {
+    margin-left: 8px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: rgba(255, 176, 32, 0.12);
+    border: 1px solid rgba(255, 176, 32, 0.35);
+    color: #ffd28a;
+    font-size: 11px;
+    white-space: nowrap;
+    vertical-align: 1px;
+}
+
 /* Banners: warn (printing) / error (load failed, with Retry). */
 .banner {
     display: flex;
