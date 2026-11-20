@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"ender-space/internal/printer"
+	"ender-space/internal/printer/creality"
 )
 
 // Полный цикл: Connect → фаза 1 (мгновенный список) → фаза 2 (фоновое
@@ -25,7 +26,7 @@ func TestLiveEnrichAllFiles(t *testing.T) {
 	const ip = "192.168.3.166"
 	rec := newEventRecorder()
 	app := NewAppWithClientAndSink(t.TempDir(),
-		func(s string) PrinterAPI { return printer.New("http://" + s) }, rec.sink)
+		func(s string) printer.Printer { return creality.New("http://" + s) }, rec.sink)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	if err := app.Connect(ctx, ip); err != nil {

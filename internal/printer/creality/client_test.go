@@ -1,4 +1,4 @@
-package printer
+package creality
 
 import (
 	"context"
@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"ender-space/internal/printer"
 
 	"github.com/gorilla/websocket"
 )
@@ -88,7 +90,7 @@ func newTestPrinter(t *testing.T) *testPrinter {
 		_ = c.WriteMessage(websocket.TextMessage, []byte(`not a json at all`))
 	})
 
-	// WS: авто-пуши дельт (тест WatchState/merge).
+	// WS: авто-пуши дельт (тест WatchStatus/merge).
 	mux.HandleFunc("/wsstate", func(w http.ResponseWriter, r *http.Request) {
 		c, err := up.Upgrade(w, r, nil)
 		if err != nil {
@@ -274,46 +276,86 @@ func TestDownloadThumbnail(t *testing.T) {
 	}
 }
 
-func TestWatchStateMerge(t *testing.T) {
+// WatchStatus: дельты доходят до наблюдателя как DeviceStatus (в этих
+// дельтах нет поля state — статус «не печатает»), после cancel ctx
+// наблюдение корректно завершается (не panic, не зависание).
+func TestWatchStatus(t *testing.T) {
 	tp := newTestPrinter(t)
 	c := tp.clientWS("/wsstate")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	merged := make(chan *State, 8)
+	tick := make(chan struct{}, 8)
 	errc := make(chan error, 1)
 	go func() {
-		errc <- c.WatchState(ctx, func(s *State) { merged <- s })
+		errc <- c.WatchStatus(ctx, func(printer.DeviceStatus) { tick <- struct{}{} })
 	}()
 
-	// Ждём, пока дельты не смержатся: printProgress=25 + nozzleTemp=210.43,
-	// и при этом printProgress НЕ сброшен второй дельтой.
-	var last *State
-	deadline := time.After(5 * time.Second)
-loop:
-	for {
-		select {
-		case s := <-merged:
-			last = s
-			p, _ := s.Int("printProgress")
-			fn, _ := s.Str("printFileName")
-			nt, _ := s.Str("nozzleTemp")
-			if p == 25 && fn == "a.gcode" && nt != "" {
-				break loop
-			}
-		case <-deadline:
-			t.Fatalf("merge дельт не сложился за 5 с; last=%v", last)
-		}
+	select {
+	case <-tick:
+	case <-time.After(5 * time.Second):
+		t.Fatal("WatchStatus не прислал статус за 5 с")
 	}
 	cancel()
-	// WatchState должна корректно завершиться по отмене ctx (не panic).
+	// WatchStatus должна корректно завершиться по отмене ctx (не panic).
 	select {
 	case err := <-errc:
 		if err != nil && !isContextError(err) {
-			t.Errorf("WatchState после cancel: %v", err)
+			t.Errorf("WatchStatus после cancel: %v", err)
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("WatchState не завершилась после cancel ctx")
+		t.Fatal("WatchStatus не завершилась после cancel ctx")
+	}
+}
+
+// Merge складывает дельты в одну картину, незаполненные поля дельты
+// прежние значения не затирают (printProgress после второй дельты на месте).
+func TestStateMerge(t *testing.T) {
+	s := NewState()
+	if err := s.Merge([]byte(`{"printProgress":25,"printFileName":"a.gcode"}`)); err != nil {
+		t.Fatalf("Merge 1: %v", err)
+	}
+	if err := s.Merge([]byte(`{"nozzleTemp":"210.43","printLeftTime":7581}`)); err != nil {
+		t.Fatalf("Merge 2: %v", err)
+	}
+	p, _ := s.Int("printProgress")
+	fn, _ := s.Str("printFileName")
+	nt, _ := s.Str("nozzleTemp")
+	if p != 25 || fn != "a.gcode" || nt == "" {
+		t.Fatalf("merge дельт не сложился: progress=%d fn=%q nt=%q (dump: %s)", p, fn, nt, s.Dump())
+	}
+	if err := s.Merge([]byte(`not a json`)); err == nil {
+		t.Error("Merge не-JSON: ожидалась ошибка")
+	}
+}
+
+// statusFromState — нормализация сырого Creality-снимка: «печатает» только
+// по state (1=Printing, 5=Paused), printFileName в простое не даёт ложной
+// метки, прошивка — из modelVersion.
+func TestStatusFromState(t *testing.T) {
+	cases := []struct {
+		push string
+		want printer.DeviceStatus
+		what string
+	}{
+		{`{"state":0,"printFileName":"/p/last.gcode"}`, printer.DeviceStatus{}, "простой, printFileName остаточный"},
+		{`{"state":1,"printFileName":"/p/a.gcode"}`, printer.DeviceStatus{Printing: true, PrintFile: "/p/a.gcode"}, "печать"},
+		{`{"state":5}`, printer.DeviceStatus{Printing: true}, "пауза (работа ещё идёт)"},
+		{`{"state":2,"printFileName":"/p/last.gcode"}`, printer.DeviceStatus{}, "завершено"},
+		{`{"state":3}`, printer.DeviceStatus{}, "сбой"},
+		{`{"state":1,"printFileName":"/p/a.gcode","modelVersion":"printer hw ver:;printer sw ver:;DWIN hw ver:F005;DWIN sw ver:V1.1.0.15;"}`,
+			printer.DeviceStatus{Printing: true, PrintFile: "/p/a.gcode", Firmware: "V1.1.0.15"}, "печать + прошивка"},
+	}
+	for _, c := range cases {
+		t.Run(c.what, func(t *testing.T) {
+			s := NewState()
+			if err := s.Merge([]byte(c.push)); err != nil {
+				t.Fatalf("Merge: %v", err)
+			}
+			if got := statusFromState(s); got != c.want {
+				t.Errorf("statusFromState = %+v, want %+v", got, c.want)
+			}
+		})
 	}
 }
 

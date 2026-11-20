@@ -19,6 +19,7 @@ import (
 	"ender-space/internal/config"
 	"ender-space/internal/gcode"
 	"ender-space/internal/printer"
+	"ender-space/internal/printer/creality"
 )
 
 // EventSink — отправка событий в фронтенд (в main — Wails-рантайм;
@@ -37,18 +38,6 @@ const (
 type EnrichProgress struct {
 	Done  int
 	Total int
-}
-
-// PrinterAPI — то, что App требует от принтера (реализует *printer.Client;
-// в тестах — мок).
-type PrinterAPI interface {
-	Info(ctx context.Context) (printer.Info, error)
-	ListFiles(ctx context.Context) ([]printer.RawFile, error)
-	DeleteFile(ctx context.Context, p, name string) error
-	PrintFile(ctx context.Context, p, name string) error
-	DownloadGcode(ctx context.Context, name string) (io.ReadCloser, error)
-	DownloadThumbnail(ctx context.Context, name string) (io.ReadCloser, error)
-	WatchState(ctx context.Context, fn func(*printer.State)) error
 }
 
 // gcodeHeadBytes — сколько читать с G-кода: весь заголовок слайсера в
@@ -72,15 +61,15 @@ type App struct {
 	mu            sync.Mutex
 	cfgDir        string
 	cfg           *config.Config
-	clientFactory func(ip string) PrinterAPI
+	clientFactory func(ip string) printer.Printer
 	sink          EventSink // события для фронтенда (nil — не шлём)
 	ip            string
 	connected     bool
 	model         string
-	client        PrinterAPI
-	state         *printer.State     // последнее смерженное состояние
-	stateCancel   context.CancelFunc // остановка WatchState при Disconnect
-	enrichCancel  context.CancelFunc // остановка фонового обогащения
+	client        printer.Printer
+	status        printer.DeviceStatus // последнее состояние от драйвера
+	stateCancel   context.CancelFunc   // остановка WatchStatus при Disconnect
+	enrichCancel  context.CancelFunc   // остановка фонового обогащения
 	gcodeCache    map[string]gcode.Info
 	thumbCache    map[string]string // «path|name» → data URI ("" — нет)
 }
@@ -93,18 +82,20 @@ func NewApp(cfgDir string) *App {
 // NewAppWithSink — то же, но события обогащения уходят в sink
 // (в main — Wails-рантайм).
 func NewAppWithSink(cfgDir string, sink EventSink) *App {
-	return NewAppWithClientAndSink(cfgDir, func(ip string) PrinterAPI {
-		return printer.New("http://" + ip)
+	return NewAppWithClientAndSink(cfgDir, func(ip string) printer.Printer {
+		return creality.New("http://" + ip)
 	}, sink)
 }
 
-// NewAppWithClient — то же, но фабрика клиента задаётся снаружи (тесты).
-func NewAppWithClient(cfgDir string, factory func(ip string) PrinterAPI) *App {
+// NewAppWithClient — то же, но фабрика принтера задаётся снаружи (тесты).
+func NewAppWithClient(cfgDir string, factory func(ip string) printer.Printer) *App {
 	return NewAppWithClientAndSink(cfgDir, factory, nil)
 }
 
-// NewAppWithClientAndSink — полный конструктор: фабрика клиента + события.
-func NewAppWithClientAndSink(cfgDir string, factory func(ip string) PrinterAPI, sink EventSink) *App {
+// NewAppWithClientAndSink — полный конструктор: фабрика принтера + события.
+// Фабрика — любой драйвер printer.Printer: creality (реальный F005),
+// emulator (отладка без железа) и будущие.
+func NewAppWithClientAndSink(cfgDir string, factory func(ip string) printer.Printer, sink EventSink) *App {
 	cfg, _ := config.Load(cfgDir) // Load не ошибается: нет файла/мусор → дефолты
 	return &App{
 		cfgDir:        cfgDir,
@@ -132,7 +123,7 @@ func (a *App) Connect(ctx context.Context, ip string) error {
 	a.ip = ip
 	a.model = info.Model // например "F005" → UI покажет "Ender-3 V3 KE"
 	a.connected = true
-	a.state = printer.NewState()
+	a.status = printer.DeviceStatus{}
 	watchCtx, cancel := context.WithCancel(context.Background())
 	a.stateCancel = cancel
 	a.mu.Unlock()
@@ -165,18 +156,18 @@ func (a *App) disconnectLocked() {
 	}
 	a.connected = false
 	a.client = nil
-	a.state = nil
+	a.status = printer.DeviceStatus{}
 	a.model = ""
 }
 
-// watchLoop держит WS-наблюдение: при обрыве переподключается, пока не
-// отменён ctx.
-func (a *App) watchLoop(ctx context.Context, client PrinterAPI) {
+// watchLoop держит наблюдение за состоянием: при обрыве переподключается,
+// пока не отменён ctx.
+func (a *App) watchLoop(ctx context.Context, client printer.Printer) {
 	for ctx.Err() == nil {
-		// Ошибка WatchState (обрыв WS) не важна: ждём паузу и повторяем.
-		_ = client.WatchState(ctx, func(s *printer.State) {
+		// Ошибка WatchStatus (обрыв связи) не важна: ждём паузу и повторяем.
+		_ = client.WatchStatus(ctx, func(ds printer.DeviceStatus) {
 			a.mu.Lock()
-			a.state = s
+			a.status = ds
 			a.mu.Unlock()
 		})
 		if ctx.Err() != nil {
@@ -191,27 +182,16 @@ func (a *App) watchLoop(ctx context.Context, client PrinterAPI) {
 	}
 }
 
-// Status — текущее состояние подключения.
+// Status — текущее состояние подключения. Поля состояния (печатает/прошивка)
+// — из последнего DeviceStatus, который прислал драйвер: нормализация сырых
+// полей протокола (state, modelVersion) — ответственность драйвера.
 func (a *App) Status() printer.PrinterStatus {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	st := printer.PrinterStatus{IP: a.ip, Connected: a.connected, Model: a.model}
-	if a.state != nil {
-		// «Печатает» только по полю state: printFileName остаётся с прошлой
-		// печати и в простое даёт ложную метку. Значения — из statusArr UI
-		// принтера: 1="Printing", 5="Printing Paused" (работа идёт).
-		if s, ok := a.state.Int("state"); ok {
-			st.Printing = s == 1 || s == 5
-			if st.Printing {
-				st.PrintFile, _ = a.state.Str("printFileName")
-			}
-		}
-		// Версия прошивки (DWIN sw ver) — из modelVersion, есть в первом
-		// снимке; отсутствует/пусто → "" (UI не показывает).
-		if mv, ok := a.state.Str("modelVersion"); ok {
-			st.FirmwareVersion = printer.FirmwareVersion(mv)
-		}
-	}
+	st.Printing = a.status.Printing
+	st.PrintFile = a.status.PrintFile
+	st.FirmwareVersion = a.status.Firmware
 	return st
 }
 
@@ -263,7 +243,7 @@ func (a *App) ListFiles(ctx context.Context) ([]printer.FileMeta, error) {
 
 // prefill — FileMeta без сетевых запросов: время/граммы из gcode-кэша,
 // превью из thumb-кэша (нет — nil/"", догонят события обогащения).
-func (a *App) prefill(rf printer.RawFile) printer.FileMeta {
+func (a *App) prefill(rf printer.File) printer.FileMeta {
 	fm := printer.FileMeta{Path: rf.Path, Name: rf.Name, Size: rf.Size, Epoch: rf.Epoch}
 	a.mu.Lock()
 	if info, ok := a.gcodeCache[gcodeCacheKey(rf)]; ok {
@@ -278,7 +258,7 @@ func (a *App) prefill(rf printer.RawFile) printer.FileMeta {
 // startEnrich — фаза 2: пул воркеров (enrichWorkers) добирает время/
 // граммы/превью и шлёт их событиями. Новая фаза (⟳, повторное ListFiles)
 // отменяет предыдущую; отменённая фаза события не шлёт.
-func (a *App) startEnrich(client PrinterAPI, files []printer.RawFile) {
+func (a *App) startEnrich(client printer.Printer, files []printer.File) {
 	total := len(files)
 
 	a.mu.Lock()
@@ -358,11 +338,11 @@ func (a *App) emit(name string, data any) {
 // уходит: следующий проход (⟳) повторит докачку.
 // gcodeCacheKey — ключ gcode-кэша: при изменении размера файла данные
 // из заголовка устарели.
-func gcodeCacheKey(rf printer.RawFile) string {
+func gcodeCacheKey(rf printer.File) string {
 	return rf.Path + "|" + rf.Name + "|" + strconv.FormatInt(rf.Size, 10)
 }
 
-func (a *App) enrich(ctx context.Context, client PrinterAPI, rf printer.RawFile) printer.FileMeta {
+func (a *App) enrich(ctx context.Context, client printer.Printer, rf printer.File) printer.FileMeta {
 	fm := printer.FileMeta{Path: rf.Path, Name: rf.Name, Size: rf.Size, Epoch: rf.Epoch}
 	key := gcodeCacheKey(rf)
 
@@ -415,7 +395,7 @@ func anyError(error) bool { return true }
 
 // downloadHeadWithRetries — скачивание заголовка G-кода с ретраями.
 // ok=false — все попытки провалились (или фаза отменена).
-func (a *App) downloadHeadWithRetries(ctx context.Context, client PrinterAPI, name string) (gcode.Info, bool) {
+func (a *App) downloadHeadWithRetries(ctx context.Context, client printer.Printer, name string) (gcode.Info, bool) {
 	var (
 		info gcode.Info
 		ok   bool
@@ -433,7 +413,7 @@ func (a *App) downloadHeadWithRetries(ctx context.Context, client PrinterAPI, na
 // downloadHead скачивает G-код и возвращает результат парсинга его
 // заголовка. ok=false — скачивание/парсинг не удалось. Принтер Range
 // игнорирует, поэтому читаем только gcodeHeadBytes.
-func downloadHead(ctx context.Context, client PrinterAPI, name string) (gcode.Info, bool) {
+func downloadHead(ctx context.Context, client printer.Printer, name string) (gcode.Info, bool) {
 	rc, err := client.DownloadGcode(ctx, name)
 	if err != nil {
 		return gcode.Info{}, false
@@ -452,7 +432,7 @@ func downloadHead(ctx context.Context, client PrinterAPI, name string) (gcode.In
 //   - успех (и 404 — «превью точно нет») — кэшируется, включая "";
 //   - сетевой провал (после 4 попыток) — в кэш НЕ уходит: следующий
 //     проход (⟳) попробует снова.
-func (a *App) thumb(ctx context.Context, client PrinterAPI, rf printer.RawFile, info gcode.Info) string {
+func (a *App) thumb(ctx context.Context, client printer.Printer, rf printer.File, info gcode.Info) string {
 	key := rf.Path + "|" + rf.Name
 	a.mu.Lock()
 	v, ok := a.thumbCache[key]
@@ -578,9 +558,9 @@ var printConfirmTimeout = 30 * time.Second
 var printPoll = 300 * time.Millisecond
 
 // StartPrint запускает печать одного файла (full — «<path>/<name>») и ждёт
-// подтверждения: принтер, как и с deleteprt, не шлёт ack на printprt —
-// подтверждением служит push состояния, где printFileName совпал с файлом
-// и state ∈ {1,5} («Printing»/«Paused»).
+// подтверждения: драйвер, как и при deleteprt, не даёт ack — подтверждением
+// служит следующий DeviceStatus, где принтер уже «печатает» и путь совпал
+// с файлом.
 func (a *App) StartPrint(ctx context.Context, full string) error {
 	client, ok := a.activeClient()
 	if !ok {
@@ -607,21 +587,16 @@ func (a *App) StartPrint(ctx context.Context, full string) error {
 	return errors.New("печать не подтвердилась: принтер не перешёл в статус «Печатает»")
 }
 
-// printingFile — полный путь печатающегося сейчас файла (из printFileName)
-// или "" — принтер не печатает. printFileName остаётся с прошлой печати,
-// поэтому доверять ему можно только при state ∈ {1,5}.
+// printingFile — полный путь печатающегося сейчас файла или "" — принтер
+// не печатает. Драйвер заполняет PrintFile только при реальной печати
+// (остаточное printFileName из прошлой печати в простое не уйдёт).
 func (a *App) printingFile() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.state == nil {
-		return ""
+	if a.status.Printing {
+		return a.status.PrintFile
 	}
-	st, ok := a.state.Int("state")
-	if !ok || (st != 1 && st != 5) {
-		return ""
-	}
-	f, _ := a.state.Str("printFileName")
-	return f
+	return ""
 }
 
 // sameFile — одно и то же ли это: полные пути равны или равны basename
@@ -636,8 +611,8 @@ func sameFile(a, b string) bool {
 	return path.Base(a) == path.Base(b)
 }
 
-// activeClient возвращает активный клиент; ok=false — если не подключены.
-func (a *App) activeClient() (PrinterAPI, bool) {
+// activeClient возвращает активный принтер; ok=false — если не подключены.
+func (a *App) activeClient() (printer.Printer, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.client, a.connected

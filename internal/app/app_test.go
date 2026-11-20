@@ -14,11 +14,11 @@ import (
 	"ender-space/internal/printer"
 )
 
-// mockPrinter — заглушка PrinterAPI с управляемым поведением.
+// mockPrinter — заглушка printer.Printer с управляемым поведением.
 type mockPrinter struct {
 	mu          sync.Mutex
 	infoOK      bool
-	files       []printer.RawFile
+	files       []printer.File
 	gcode       map[string][]byte // name → тело G-кода
 	thumbs      map[string][]byte // name → PNG превью
 	downloadErr map[string]error  // name → ошибка скачивания
@@ -28,8 +28,8 @@ type mockPrinter struct {
 	listLag     int               // файл исчезает из списка через N вызовов ListFiles (0 — сразу)
 	pendingDel  map[string]int    // "path|name" → остаток вызовов ListFiles до исчезновения
 	deleted     []string
-	printed     []string    // "path/name" → ушедшие printprt
-	statePush   chan string // сырой JSON состояния; WatchState пушит в наблюдателя
+	printed     []string                  // "path/name" → ушедшие printprt
+	statePush   chan printer.DeviceStatus // нормализованные статусы; WatchStatus пушит в наблюдателя
 }
 
 func (m *mockPrinter) Info(ctx context.Context) (printer.Info, error) {
@@ -39,7 +39,7 @@ func (m *mockPrinter) Info(ctx context.Context) (printer.Info, error) {
 	return printer.Info{MAC: "TEST", Model: "F005"}, nil
 }
 
-func (m *mockPrinter) ListFiles(ctx context.Context) ([]printer.RawFile, error) {
+func (m *mockPrinter) ListFiles(ctx context.Context) ([]printer.File, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	// Принтер обрабатывает deleteprt асинхронно: файл исчезает из списка
@@ -52,7 +52,7 @@ func (m *mockPrinter) ListFiles(ctx context.Context) ([]printer.RawFile, error) 
 			m.pendingDel[key] = left - 1
 		}
 	}
-	out := make([]printer.RawFile, len(m.files))
+	out := make([]printer.File, len(m.files))
 	copy(out, m.files)
 	return out, nil
 }
@@ -145,29 +145,27 @@ func (m *mockPrinter) DownloadThumbnail(ctx context.Context, name string) (io.Re
 	return io.NopCloser(bytes.NewReader(body)), nil
 }
 
-// WatchState: без statePush молчит (большинство тестов состояние не
-// проверяют); с каналом — пушит туда присланный JSON как push-сообщения.
-func (m *mockPrinter) WatchState(ctx context.Context, fn func(*printer.State)) error {
+// WatchStatus: без statePush молчит (большинство тестов состояние не
+// проверяют); с каналом — пушит в наблюдателя присланные DeviceStatus
+// (нормализация сырого протокола — в драйвере, мок уже «драйвер»).
+func (m *mockPrinter) WatchStatus(ctx context.Context, fn func(printer.DeviceStatus)) error {
 	if m.statePush == nil {
 		<-ctx.Done()
 		return ctx.Err()
 	}
-	st := printer.NewState()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case raw := <-m.statePush:
-			if err := st.Merge([]byte(raw)); err == nil {
-				fn(st)
-			}
+		case ds := <-m.statePush:
+			fn(ds)
 		}
 	}
 }
 
 func newTestApp(t *testing.T, m *mockPrinter) *App {
 	t.Helper()
-	return NewAppWithClient(t.TempDir(), func(ip string) PrinterAPI { return m })
+	return NewAppWithClient(t.TempDir(), func(ip string) printer.Printer { return m })
 }
 
 // eventRecorder — EventSink для тестов: собирает события обогащения.
@@ -245,7 +243,7 @@ func (r *eventRecorder) enrichedByName(t *testing.T, name string) printer.FileMe
 func newTestAppWithEvents(t *testing.T, m *mockPrinter) (*App, *eventRecorder) {
 	t.Helper()
 	rec := newEventRecorder()
-	a := NewAppWithClientAndSink(t.TempDir(), func(ip string) PrinterAPI { return m }, rec.sink)
+	a := NewAppWithClientAndSink(t.TempDir(), func(ip string) printer.Printer { return m }, rec.sink)
 	a.connected = true
 	a.client = m
 	t.Cleanup(func() { _ = a.Disconnect() })
@@ -261,7 +259,7 @@ func loadAppConfig(a *App) (*config.Config, error) {
 // и в обогащённых событиях.
 func TestListFilesCarriesUploadDate(t *testing.T) {
 	m := &mockPrinter{
-		files: []printer.RawFile{{Path: "/p", Name: "a.gcode", Size: 100, Epoch: 1795096114}},
+		files: []printer.File{{Path: "/p", Name: "a.gcode", Size: 100, Epoch: 1795096114}},
 	}
 	app, rec := newTestAppWithEvents(t, m)
 
@@ -280,7 +278,7 @@ func TestListFilesCarriesUploadDate(t *testing.T) {
 
 func TestListFilesMergesGcodeInfo(t *testing.T) {
 	m := &mockPrinter{
-		files: []printer.RawFile{
+		files: []printer.File{
 			{Path: "/p", Name: "a.gcode", Size: 100},
 			{Path: "/p", Name: "b.gcode", Size: 200},
 		},
@@ -318,7 +316,7 @@ func TestListFilesMergesGcodeInfo(t *testing.T) {
 func TestListFilesParserFailureKeepsFile(t *testing.T) {
 	fastRetries(t)
 	m := &mockPrinter{
-		files: []printer.RawFile{
+		files: []printer.File{
 			{Path: "/p", Name: "a.gcode", Size: 100},
 			{Path: "/p", Name: "b.gcode", Size: 200},
 		},
@@ -356,7 +354,7 @@ func fastDeletes(t *testing.T) {
 func TestDeleteFilesAllOK(t *testing.T) {
 	fastDeletes(t)
 	m := &mockPrinter{
-		files: []printer.RawFile{{Path: "/p", Name: "a.gcode", Size: 100}},
+		files: []printer.File{{Path: "/p", Name: "a.gcode", Size: 100}},
 	}
 	app := newTestApp(t, m)
 	app.connected = true
@@ -379,7 +377,7 @@ func TestDeleteFilesAllOK(t *testing.T) {
 func TestDeleteFilesDelayedProcessing(t *testing.T) {
 	fastDeletes(t)
 	m := &mockPrinter{
-		files:   []printer.RawFile{{Path: "/p", Name: "a.gcode", Size: 100}},
+		files:   []printer.File{{Path: "/p", Name: "a.gcode", Size: 100}},
 		listLag: 2, // исчезнет после 2-го ListFiles
 	}
 	app := newTestApp(t, m)
@@ -423,7 +421,7 @@ func waitStatus(t *testing.T, app *App, want func(printer.PrinterStatus) bool) {
 // успех, printprt ушёл ровно один раз.
 func TestStartPrintHappyPath(t *testing.T) {
 	fastPrintConfirm(t)
-	m := &mockPrinter{infoOK: true, statePush: make(chan string, 8)}
+	m := &mockPrinter{infoOK: true, statePush: make(chan printer.DeviceStatus, 8)}
 	app := newTestApp(t, m)
 	if err := app.Connect(context.Background(), "192.168.3.166"); err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -436,7 +434,7 @@ func TestStartPrintHappyPath(t *testing.T) {
 		deadline := time.Now().Add(2 * time.Second)
 		for time.Now().Before(deadline) {
 			if m.printedCount() > 0 {
-				m.statePush <- `{"state":1,"printFileName":"/p/a.gcode"}`
+				m.statePush <- printer.DeviceStatus{Printing: true, PrintFile: full}
 				return
 			}
 			time.Sleep(5 * time.Millisecond)
@@ -455,14 +453,14 @@ func TestStartPrintHappyPath(t *testing.T) {
 // не отправляется.
 func TestStartPrintRejectsWhilePrinting(t *testing.T) {
 	fastPrintConfirm(t)
-	m := &mockPrinter{infoOK: true, statePush: make(chan string, 8)}
+	m := &mockPrinter{infoOK: true, statePush: make(chan printer.DeviceStatus, 8)}
 	app := newTestApp(t, m)
 	if err := app.Connect(context.Background(), "192.168.3.166"); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 	t.Cleanup(func() { _ = app.Disconnect() })
 
-	m.statePush <- `{"state":1,"printFileName":"/p/other.gcode"}`
+	m.statePush <- printer.DeviceStatus{Printing: true, PrintFile: "/p/other.gcode"}
 	waitStatus(t, app, func(st printer.PrinterStatus) bool { return st.Printing })
 	if st := app.Status(); st.PrintFile != "/p/other.gcode" {
 		t.Errorf("Status().PrintFile = %q, want /p/other.gcode", st.PrintFile)
@@ -479,7 +477,7 @@ func TestStartPrintRejectsWhilePrinting(t *testing.T) {
 // printprt ушёл, но состояние не меняется — честный таймаут подтверждения.
 func TestStartPrintNoConfirmTimeout(t *testing.T) {
 	fastPrintConfirm(t)
-	m := &mockPrinter{infoOK: true, statePush: make(chan string, 8)}
+	m := &mockPrinter{infoOK: true, statePush: make(chan printer.DeviceStatus, 8)}
 	app := newTestApp(t, m)
 	if err := app.Connect(context.Background(), "192.168.3.166"); err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -502,8 +500,8 @@ func TestDeleteFilesRejectsPrintingFile(t *testing.T) {
 	fastDeletes(t)
 	m := &mockPrinter{
 		infoOK:    true,
-		statePush: make(chan string, 8),
-		files: []printer.RawFile{
+		statePush: make(chan printer.DeviceStatus, 8),
+		files: []printer.File{
 			{Path: "/p", Name: "a.gcode", Size: 100},
 			{Path: "/p", Name: "b.gcode", Size: 200},
 		},
@@ -514,7 +512,7 @@ func TestDeleteFilesRejectsPrintingFile(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = app.Disconnect() })
 
-	m.statePush <- `{"state":1,"printFileName":"/p/a.gcode"}`
+	m.statePush <- printer.DeviceStatus{Printing: true, PrintFile: "/p/a.gcode"}
 	waitStatus(t, app, func(st printer.PrinterStatus) bool { return st.Printing })
 
 	if err := app.DeleteFiles(context.Background(), []string{"/p/a.gcode"}); err == nil {
@@ -528,17 +526,17 @@ func TestDeleteFilesRejectsPrintingFile(t *testing.T) {
 	}
 }
 
-// Версия прошивки (DWIN sw ver из modelVersion) доходит до Status.
+// Версия прошивки из DeviceStatus драйвера доходит до Status (разбор
+// modelVersion — в драйвере, тестируется в internal/printer/creality).
 func TestStatusFirmwareVersion(t *testing.T) {
-	m := &mockPrinter{infoOK: true, statePush: make(chan string, 8)}
+	m := &mockPrinter{infoOK: true, statePush: make(chan printer.DeviceStatus, 8)}
 	app := newTestApp(t, m)
 	if err := app.Connect(context.Background(), "192.168.3.166"); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 	t.Cleanup(func() { _ = app.Disconnect() })
 
-	const mv = "printer hw ver:;printer sw ver:;DWIN hw ver:F005;DWIN sw ver:V1.1.0.15;"
-	m.statePush <- `{"state":0,"modelVersion":"` + mv + `"}`
+	m.statePush <- printer.DeviceStatus{Firmware: "V1.1.0.15"}
 	waitStatus(t, app, func(st printer.PrinterStatus) bool { return st.FirmwareVersion != "" })
 	if st := app.Status(); st.FirmwareVersion != "V1.1.0.15" {
 		t.Errorf("Status().FirmwareVersion = %q, want V1.1.0.15", st.FirmwareVersion)
@@ -550,7 +548,7 @@ func TestStatusFirmwareVersion(t *testing.T) {
 func TestDeleteFilesStillPresent(t *testing.T) {
 	fastDeletes(t)
 	m := &mockPrinter{
-		files: []printer.RawFile{
+		files: []printer.File{
 			{Path: "/p", Name: "a.gcode", Size: 100},
 			{Path: "/p", Name: "b.gcode", Size: 200},
 		},
@@ -609,40 +607,36 @@ func TestConnectFailsWhenPrinterUnreachable(t *testing.T) {
 	}
 }
 
-// «Печатает» только по полю state (1=печать, 5=пауза); остаточный
-// printFileName из прошлой печати в простое ложную метку не даёт.
-func TestStatusPrintingByState(t *testing.T) {
+// App проходит DeviceStatus драйвера без изменений: печатает по флагу
+// Printing, PrintFile виден только при печати. (Нормализация сырого
+// состояния — в драйвере, тестируется в internal/printer/creality.)
+func TestStatusPassesThroughDriverStatus(t *testing.T) {
 	m := &mockPrinter{infoOK: true}
 	app := newTestApp(t, m)
 	app.connected = true
 	app.client = m
-	st := printer.NewState()
 	app.mu.Lock()
-	app.state = st
+	app.status = printer.DeviceStatus{Printing: true, PrintFile: "/p/a.gcode"}
 	app.mu.Unlock()
 
-	cases := []struct {
-		push string
-		want bool
-		what string
-	}{
-		{`{"state":0,"printFileName":"/p/last.gcode"}`, false, "простой, printFileName остаточный"},
-		{`{"state":1}`, true, "печать"},
-		{`{"state":5}`, true, "пауза (работа ещё идёт)"},
-		{`{"state":2}`, false, "завершено"},
-		{`{"state":3}`, false, "сбой"},
+	st := app.Status()
+	if !st.Printing || st.PrintFile != "/p/a.gcode" {
+		t.Errorf("Status = %+v, want Printing и PrintFile=/p/a.gcode", st)
 	}
-	for _, c := range cases {
-		_ = st.Merge([]byte(c.push))
-		if got := app.Status().Printing; got != c.want {
-			t.Errorf("push %s: Printing = %v, want %v (%s)", c.push, got, c.want, c.what)
-		}
+
+	// Печать завершилась: PrintFile сброшен драйвером.
+	app.mu.Lock()
+	app.status = printer.DeviceStatus{}
+	app.mu.Unlock()
+	st = app.Status()
+	if st.Printing || st.PrintFile != "" {
+		t.Errorf("Status = %+v, want не печатает и пустой PrintFile", st)
 	}
 }
 
 func TestStorageSumsSizes(t *testing.T) {
 	m := &mockPrinter{
-		files: []printer.RawFile{
+		files: []printer.File{
 			{Path: "/p", Name: "a.gcode", Size: 100},
 			{Path: "/p", Name: "b.gcode", Size: 200},
 		},
@@ -669,11 +663,11 @@ func TestStorageSumsSizes(t *testing.T) {
 func TestListFilesCachesGcodeInfo(t *testing.T) {
 	downloads := 0
 	m := &mockPrinter{
-		files: []printer.RawFile{{Path: "/p", Name: "a.gcode", Size: 100}},
+		files: []printer.File{{Path: "/p", Name: "a.gcode", Size: 100}},
 		gcode: map[string][]byte{"a.gcode": []byte("; total filament used [g] = 5\n")},
 	}
 	rec := newEventRecorder()
-	app := NewAppWithClientAndSink(t.TempDir(), func(ip string) PrinterAPI { return m }, rec.sink)
+	app := NewAppWithClientAndSink(t.TempDir(), func(ip string) printer.Printer { return m }, rec.sink)
 	app.connected = true
 	t.Cleanup(func() { _ = app.Disconnect() })
 	// Подсчёт скачиваний обёрткой
@@ -713,7 +707,7 @@ type countingDownloader struct {
 func (c *countingDownloader) Info(ctx context.Context) (printer.Info, error) {
 	return c.m.Info(ctx)
 }
-func (c *countingDownloader) ListFiles(ctx context.Context) ([]printer.RawFile, error) {
+func (c *countingDownloader) ListFiles(ctx context.Context) ([]printer.File, error) {
 	return c.m.ListFiles(ctx)
 }
 func (c *countingDownloader) DeleteFile(ctx context.Context, path, name string) error {
@@ -734,15 +728,15 @@ func (c *countingDownloader) DownloadThumbnail(ctx context.Context, name string)
 	}
 	return c.m.DownloadThumbnail(ctx, name)
 }
-func (c *countingDownloader) WatchState(ctx context.Context, fn func(*printer.State)) error {
-	return c.m.WatchState(ctx, fn)
+func (c *countingDownloader) WatchStatus(ctx context.Context, fn func(printer.DeviceStatus)) error {
+	return c.m.WatchStatus(ctx, fn)
 }
 
 // Заголовок G-кода молчит (как у OrcaSlicer 2.5.1): время — из имени файла,
 // граммы — из length (мм) из WS-списка.
 func TestListFilesFallbacks(t *testing.T) {
 	m := &mockPrinter{
-		files: []printer.RawFile{
+		files: []printer.File{
 			{Path: "/p", Name: "orcs_3_PLA_2h30m.gcode", Size: 1000, FilamentMM: 3048},
 			{Path: "/p", Name: "Holder.gcode", Size: 2000, FilamentMM: 0},
 		},
@@ -782,7 +776,7 @@ func TestListFilesFallbacks(t *testing.T) {
 // Заголовок G-кода приоритетнее имени: имя «1h0m0s», в файле 2 часа.
 func TestListFilesHeaderBeatsFilename(t *testing.T) {
 	m := &mockPrinter{
-		files: []printer.RawFile{
+		files: []printer.File{
 			{Path: "/p", Name: "part_PLA_1h0m0s.gcode", Size: 100, FilamentMM: 1000},
 		},
 		gcode: map[string][]byte{
@@ -805,7 +799,7 @@ func TestListFilesHeaderBeatsFilename(t *testing.T) {
 // (Done растёт, Total постоянен), в конце files:done; фаза 1 — сразу.
 func TestEnrichEmitsProgress(t *testing.T) {
 	m := &mockPrinter{
-		files: []printer.RawFile{
+		files: []printer.File{
 			{Path: "/p", Name: "a.gcode", Size: 100},
 			{Path: "/p", Name: "b.gcode", Size: 200},
 			{Path: "/p", Name: "c.gcode", Size: 300},
@@ -851,7 +845,7 @@ func TestEnrichEmitsProgress(t *testing.T) {
 func TestListFilesThumb(t *testing.T) {
 	png := []byte{0x89, 'P', 'N', 'G'}
 	m := &mockPrinter{
-		files: []printer.RawFile{
+		files: []printer.File{
 			{Path: "/p", Name: "a.gcode", Size: 100},
 			{Path: "/p", Name: "b.gcode", Size: 200},
 		},
@@ -884,12 +878,12 @@ func TestEnrichRetriesTransientFailure(t *testing.T) {
 	fastRetries(t)
 	downloads := 0
 	m := &mockPrinter{
-		files: []printer.RawFile{{Path: "/p", Name: "a.gcode", Size: 100}},
+		files: []printer.File{{Path: "/p", Name: "a.gcode", Size: 100}},
 		gcode: map[string][]byte{"a.gcode": []byte("; total filament used [g] = 7\n")},
 		flaky: map[string]int{"a.gcode": 2},
 	}
 	rec := newEventRecorder()
-	app := NewAppWithClientAndSink(t.TempDir(), func(ip string) PrinterAPI { return m }, rec.sink)
+	app := NewAppWithClientAndSink(t.TempDir(), func(ip string) printer.Printer { return m }, rec.sink)
 	app.connected = true
 	app.client = &countingDownloader{m: m, n: &downloads}
 	t.Cleanup(func() { _ = app.Disconnect() })
@@ -913,12 +907,12 @@ func TestFailureNotCachedRetriesNextPass(t *testing.T) {
 	fastRetries(t)
 	downloads := 0
 	m := &mockPrinter{
-		files: []printer.RawFile{{Path: "/p", Name: "a.gcode", Size: 100}},
+		files: []printer.File{{Path: "/p", Name: "a.gcode", Size: 100}},
 		gcode: map[string][]byte{"a.gcode": []byte("; total filament used [g] = 7\n")},
 		flaky: map[string]int{"a.gcode": 100}, // «всегда» падают
 	}
 	rec := newEventRecorder()
-	app := NewAppWithClientAndSink(t.TempDir(), func(ip string) PrinterAPI { return m }, rec.sink)
+	app := NewAppWithClientAndSink(t.TempDir(), func(ip string) printer.Printer { return m }, rec.sink)
 	app.connected = true
 	app.client = &countingDownloader{m: m, n: &downloads}
 	t.Cleanup(func() { _ = app.Disconnect() })
@@ -956,12 +950,12 @@ func TestThumbFailureNotCached(t *testing.T) {
 	fastRetries(t)
 	png := []byte{0x89, 'P', 'N', 'G'}
 	m := &mockPrinter{
-		files:      []printer.RawFile{{Path: "/p", Name: "a.gcode", Size: 100}},
+		files:      []printer.File{{Path: "/p", Name: "a.gcode", Size: 100}},
 		gcode:      map[string][]byte{"a.gcode": []byte("G28\n")},
 		thumbFlaky: map[string]int{"a.gcode": 100}, // «всегда» падают
 	}
 	rec := newEventRecorder()
-	app := NewAppWithClientAndSink(t.TempDir(), func(ip string) PrinterAPI { return m }, rec.sink)
+	app := NewAppWithClientAndSink(t.TempDir(), func(ip string) printer.Printer { return m }, rec.sink)
 	app.connected = true
 	app.client = m
 	t.Cleanup(func() { _ = app.Disconnect() })
@@ -996,12 +990,12 @@ func TestThumbNotFoundIsFinal(t *testing.T) {
 	fastRetries(t)
 	png := []byte{0x89, 'P', 'N', 'G'}
 	m := &mockPrinter{
-		files: []printer.RawFile{{Path: "/p", Name: "a.gcode", Size: 100}},
+		files: []printer.File{{Path: "/p", Name: "a.gcode", Size: 100}},
 		gcode: map[string][]byte{"a.gcode": []byte("G28\n")},
 	}
 	cdn := &countingDownloader{m: m, nThumb: new(int)}
 	rec := newEventRecorder()
-	app := NewAppWithClientAndSink(t.TempDir(), func(ip string) PrinterAPI { return m }, rec.sink)
+	app := NewAppWithClientAndSink(t.TempDir(), func(ip string) printer.Printer { return m }, rec.sink)
 	app.connected = true
 	app.client = cdn
 	t.Cleanup(func() { _ = app.Disconnect() })

@@ -1,6 +1,8 @@
-// Package printer — клиент принтера Creality Ender-3 V3 KE (F005).
-// Протокол: HTTP (порт 80) + WebSocket (порт 9999). Контракт: docs/api-contract.md.
-package printer
+// Package creality — клиент принтера Creality Ender-3 V3 KE (F005).
+// Протокол: HTTP (порт 80) + WebSocket (порт 9999). Контракт:
+// docs/api-contract.md. Клиент реализует интерфейс printer.Printer;
+// тот же принтер с другой ОС — отдельный драйвер рядом с этим пакетом.
+package creality
 
 import (
 	"context"
@@ -14,15 +16,13 @@ import (
 	"strings"
 	"time"
 
+	"ender-space/internal/printer"
+
 	"github.com/gorilla/websocket"
 )
 
 // wsPort — порт кастомного WebSocket-сервера Creality.
 const wsPort = "9999"
-
-// ErrNotFound — принтер ответил 404: ресурса точно нет (отличается от
-// сетевого сбоя, который стоит ретраить).
-var ErrNotFound = errors.New("http 404: resource not found")
 
 // readTimeout — лимит ожидания одного WS-ответа (список файлов).
 const readTimeout = 5 * time.Second
@@ -31,6 +31,10 @@ const readTimeout = 5 * time.Second
 // особенно под параллельной нагрузкой и во время печати: 5 с (общий таймаут
 // /info) здесь убивает даже ретраи.
 const downloadTimeout = 60 * time.Second
+
+// silenceTimeout — «тишина» WS-соединения, после которой наблюдение
+// считается обрывом (принтер шлёт push каждые ~1–2 с).
+const silenceTimeout = 10 * time.Second
 
 // Client — гибридный HTTP+WS клиент одного принтера.
 type Client struct {
@@ -76,15 +80,15 @@ func hostOnly(base string) string {
 }
 
 // Info — GET /info (mac, модель).
-func (c *Client) Info(ctx context.Context) (Info, error) {
+func (c *Client) Info(ctx context.Context) (printer.Info, error) {
 	var raw struct {
 		MAC   string `json:"mac"`
 		Model string `json:"model"`
 	}
 	if err := c.getJSON(ctx, "/info", &raw); err != nil {
-		return Info{}, err
+		return printer.Info{}, err
 	}
-	return Info{MAC: raw.MAC, Model: raw.Model}, nil
+	return printer.Info{MAC: raw.MAC, Model: raw.Model}, nil
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, out any) error {
@@ -108,7 +112,7 @@ func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 
 // ListFiles — WS reqGcodeFile. Ответ приходит асинхронно среди push-сообщений,
 // поэтому читаем, пока не встретим retGcodeFileInfo (или таймаут).
-func (c *Client) ListFiles(ctx context.Context) ([]RawFile, error) {
+func (c *Client) ListFiles(ctx context.Context) ([]printer.File, error) {
 	conn, err := c.dial(ctx)
 	if err != nil {
 		return nil, err
@@ -143,7 +147,7 @@ func (c *Client) ListFiles(ctx context.Context) ([]RawFile, error) {
 
 // tryParseFileList: data — JSON-объект; если есть retGcodeFileInfo — разбираем
 // список и done=true; иначе (push состояния) done=false. Некорректный JSON — ошибка.
-func tryParseFileList(data []byte) ([]RawFile, bool, error) {
+func tryParseFileList(data []byte) ([]printer.File, bool, error) {
 	var payload struct {
 		Ret *struct {
 			TotalNum int    `json:"totalNum"`
@@ -159,9 +163,10 @@ func tryParseFileList(data []byte) ([]RawFile, bool, error) {
 	return parseFileInfo(payload.Ret.FileInfo)
 }
 
-// parseFileInfo разбирает строку "rec;rec;..." где rec = path:name:size:layer:epoch:mm:thumb.
-func parseFileInfo(fileInfo string) ([]RawFile, bool, error) {
-	var out []RawFile
+// parseFileInfo разбирает строку "rec;rec;..." где
+// rec = path:name:size:layer:epoch:mm:thumb.
+func parseFileInfo(fileInfo string) ([]printer.File, bool, error) {
+	var out []printer.File
 	for _, rec := range strings.Split(fileInfo, ";") {
 		rec = strings.TrimSpace(rec)
 		if rec == "" {
@@ -171,7 +176,7 @@ func parseFileInfo(fileInfo string) ([]RawFile, bool, error) {
 		if len(f) < 7 {
 			return nil, false, fmt.Errorf("ws: запись списка короче 7 полей: %q", rec)
 		}
-		var rf RawFile
+		var rf printer.File
 		rf.Path = f[0]
 		rf.Name = f[1]
 		size, err := parseInt64(f[2])
@@ -260,16 +265,17 @@ func (c *Client) download(ctx context.Context, path string) (io.ReadCloser, erro
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
 		if resp.StatusCode == http.StatusNotFound {
-			return nil, fmt.Errorf("GET %s: %w", path, ErrNotFound)
+			return nil, fmt.Errorf("GET %s: %w", path, printer.ErrNotFound)
 		}
 		return nil, fmt.Errorf("GET %s: HTTP %d", path, resp.StatusCode)
 	}
 	return resp.Body, nil
 }
 
-// WatchState — WS: читает периодические push-сообщения состояния, мерджит их
-// в State и на каждое вызывает fn. Возвращает, когда ctx отменён или WS упал.
-func (c *Client) WatchState(ctx context.Context, fn func(*State)) error {
+// WatchStatus — WS: читает периодические push-сообщения состояния, мерджит
+// их в State, нормализует в printer.DeviceStatus и на каждое вызывает fn.
+// Возвращает, когда ctx отменён или WS упал.
+func (c *Client) WatchStatus(ctx context.Context, fn func(printer.DeviceStatus)) error {
 	conn, err := c.dial(ctx)
 	if err != nil {
 		return err
@@ -283,8 +289,7 @@ func (c *Client) WatchState(ctx context.Context, fn func(*State)) error {
 	}()
 
 	state := NewState()
-	// Принтер шлёт push каждые ~1–2 с; даём щедрый read-таймаут на «тишину».
-	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(silenceTimeout))
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -306,8 +311,27 @@ func (c *Client) WatchState(ctx context.Context, fn func(*State)) error {
 			// Push не-JSON игнорируем, не роняем наблюдение.
 			continue
 		}
-		fn(state)
+		fn(statusFromState(state))
 	}
+}
+
+// statusFromState — нормализует сырой Creality-снимок в общий DeviceStatus.
+// «Печатает» только по полю state: printFileName остаётся с прошлой печати
+// и в простое даёт ложную метку. Значения — из statusArr UI принтера:
+// 1="Printing", 5="Printing Paused" (работа идёт). Версия прошивки (DWIN sw
+// ver) — из modelVersion; нет/пусто → "".
+func statusFromState(s *State) printer.DeviceStatus {
+	ds := printer.DeviceStatus{}
+	if mv, ok := s.Str("modelVersion"); ok {
+		ds.Firmware = FirmwareVersion(mv)
+	}
+	st, ok := s.Int("state")
+	if !ok || (st != 1 && st != 5) {
+		return ds
+	}
+	ds.Printing = true
+	ds.PrintFile, _ = s.Str("printFileName")
+	return ds
 }
 
 func (c *Client) dial(ctx context.Context) (*websocket.Conn, error) {
