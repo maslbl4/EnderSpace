@@ -52,6 +52,9 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
   // Таблица показывается только после files:done — к этому моменту у всех
   // файлов собраны время/граммы/превью. До неё — прогресс-полоска.
   const [tableReady, setTableReady] = useState(false);
+  // Свёрнута ли карточка файлов (только шапка с количеством). Не
+  // сохраняется между запусками — по умолчанию таблица открыта.
+  const [filesCollapsed, setFilesCollapsed] = useState(false);
 
   const loading = !tableReady && !loadError;
 
@@ -326,12 +329,14 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
           loading={false}
           selected={selected}
           printingName={printingName}
+          collapsed={filesCollapsed}
           onToggle={toggle}
           onToggleAll={toggleAll}
+          onToggleCollapsed={() => setFilesCollapsed((v) => !v)}
         />
       ) : null}
 
-      {tableReady && files !== null ? (
+      {tableReady && files !== null && !filesCollapsed ? (
         <div className="footer-bar">
           <span className="footer-info">
             {t('selected')}: {selectedList.length}{' '}

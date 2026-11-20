@@ -387,7 +387,24 @@ body {
     font-weight: 700;
     letter-spacing: 0.01em;
     color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 2px;
 }
+/* Кнопка-шеvron сворачивания карточки: клик по ней или по тексту заголовка. */
+.collapse-btn {
+    background: none;
+    border: none;
+    padding: 2px 5px;
+    margin: 0;
+    font-size: 13px;
+    line-height: 1;
+    color: var(--muted);
+    cursor: pointer;
+}
+.collapse-btn:hover { color: var(--accent-2); }
+.card-title-text { cursor: pointer; user-select: none; }
+.card-title-text:hover { color: var(--accent-2); }
 
 /* Storage meter. */
 .meter {
@@ -496,6 +513,8 @@ body {
     flex-direction: column;
     --wails-draggable: no-drag;
 }
+/* Свёрнутая карточка: только шапка, остаток высоты не растягивает её. */
+.files-card-collapsed { flex: 0 0 auto; }
 .table-wrap {
     flex: 1 1 auto;
     min-height: 90px;

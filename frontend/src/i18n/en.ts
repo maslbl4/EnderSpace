@@ -26,6 +26,8 @@ export const en: Record<I18nKey, string> = {
   legendModels: 'Models (G-code)',
   enriching: 'Filling in print times and previews…',
   filesTitle: 'Files',
+  collapse: 'Collapse',
+  expand: 'Expand',
   colName: 'File name',
   colSize: 'Size',
   colDate: 'Uploaded',

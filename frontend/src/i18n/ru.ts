@@ -26,6 +26,8 @@ export const ru = {
   legendModels: 'Модели (G-коды)',
   enriching: 'Заполняем время печати и превью…',
   filesTitle: 'Файлы',
+  collapse: 'Свернуть',
+  expand: 'Развернуть',
   colName: 'Имя файла',
   colSize: 'Размер',
   colDate: 'Загружен',

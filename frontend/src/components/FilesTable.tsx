@@ -33,15 +33,19 @@ export default function FilesTable({
   loading,
   selected,
   printingName,
+  collapsed,
   onToggle,
   onToggleAll,
+  onToggleCollapsed,
 }: {
   files: FileMeta[];
   loading: boolean;
   selected: ReadonlySet<string>;
   printingName?: string; // basename печатающегося файла ("" — нет)
+  collapsed: boolean; // таблица свёрнута — видна только шапка карточки
   onToggle: (key: string) => void;
   onToggleAll: () => void;
+  onToggleCollapsed: () => void;
 }) {
   useI18n(); // перерисовка при смене языка
   // По умолчанию — по дате загрузки, новые сверху (по убыванию).
@@ -199,20 +203,33 @@ export default function FilesTable({
   // её containing block для position: fixed (координаты бы «поехали»).
   return (
     <>
-    <section className="card files-card">
+    <section className={`card files-card${collapsed ? ' files-card-collapsed' : ''}`}>
       <h2 className="card-title">
-        {t('filesTitle')}
-        {!loading ? ` (${files.length})` : ''}
+        <button
+          type="button"
+          className="collapse-btn"
+          onClick={onToggleCollapsed}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? t('expand') : t('collapse')}
+          title={collapsed ? t('expand') : t('collapse')}
+        >
+          {collapsed ? '▸' : '▾'}
+        </button>
+        <span className="card-title-text" onClick={onToggleCollapsed}>
+          {t('filesTitle')}
+          {!loading ? ` (${files.length})` : ''}
+        </span>
       </h2>
-      {loading ? (
-        <div className="skeleton" aria-hidden>
-          {Array.from({ length: 6 }, (_, i) => (
-            <div className="skeleton-row" key={i} />
-          ))}
-        </div>
-      ) : files.length === 0 ? (
-        <p className="empty">{t('memoryEmpty')}</p>
-      ) : (
+      {!collapsed &&
+        (loading ? (
+          <div className="skeleton" aria-hidden>
+            {Array.from({ length: 6 }, (_, i) => (
+              <div className="skeleton-row" key={i} />
+            ))}
+          </div>
+        ) : files.length === 0 ? (
+          <p className="empty">{t('memoryEmpty')}</p>
+        ) : (
         <div className="table-wrap">
           <table className="files-table">
             <thead>
@@ -358,7 +375,7 @@ export default function FilesTable({
             </tbody>
           </table>
         </div>
-      )}
+        ))}
     </section>
     {zoom ? (
       <img
