@@ -30,8 +30,9 @@ export default function FilesTable({
   onToggleAll: () => void;
 }) {
   useI18n(); // перерисовка при смене языка
-  const [sortKey, setSortKey] = useState<SortKey>('name');
-  const [sortAsc, setSortAsc] = useState(true);
+  // По умолчанию — по дате загрузки, новые сверху (по убыванию).
+  const [sortKey, setSortKey] = useState<SortKey>('date');
+  const [sortAsc, setSortAsc] = useState(false);
   const [zoom, setZoom] = useState<Zoom | null>(null);
 
   const sorted = useMemo(() => {
