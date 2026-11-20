@@ -524,6 +524,29 @@ body {
     top: 0;
     background: rgba(13, 17, 28, 0.92);
 }
+/* Ручка ресайза колонки: узкая зона на правом крае заголовка,
+   подсвечивается при наведении. */
+.th-resize {
+    position: absolute;
+    top: 0;
+    right: -3px;
+    width: 7px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 1;
+}
+.th-resize::after {
+    content: '';
+    position: absolute;
+    top: 25%;
+    bottom: 25%;
+    left: 3px;
+    width: 2px;
+    border-radius: 1px;
+    background: transparent;
+    transition: background 0.12s ease;
+}
+.th-resize:hover::after { background: rgba(255, 45, 114, 0.85); }
 .files-table tbody tr { border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
 .files-table tbody tr:hover { background: var(--glass-strong); }
 .files-table .num { text-align: right; font-variant-numeric: tabular-nums; }

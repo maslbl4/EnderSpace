@@ -2,6 +2,7 @@
 // «—» — значение не найдено (всегда в конце сортировки); сортировка по
 // всем колонкам; скелетон во время загрузки; зум превью при наведении.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import { t, useI18n } from '../i18n';
 import type { FileMeta } from '../lib/api';
 import { formatBytes, formatDate, formatDuration, formatGrams } from '../lib/format';
@@ -10,6 +11,16 @@ import { formatBytes, formatDate, formatDuration, formatGrams } from '../lib/for
 export const fileKey = (f: FileMeta) => f.Path + '/' + f.Name;
 
 type SortKey = 'name' | 'size' | 'date' | 'time' | 'plastic';
+
+// Ресайз колонок мышкой: перетаскиваются все, кроме чекбокса и превью.
+// Ширины живут только в состоянии (между запусками не сохраняются).
+const MIN_COL_WIDTH: Record<SortKey, number> = {
+  name: 120,
+  size: 60,
+  date: 60,
+  time: 60,
+  plastic: 60,
+};
 
 // zoom — увеличенное превью (по центру окна, позиция в CSS).
 type Zoom = { src: string };
@@ -34,6 +45,53 @@ export default function FilesTable({
   const [sortKey, setSortKey] = useState<SortKey>('date');
   const [sortAsc, setSortAsc] = useState(false);
   const [zoom, setZoom] = useState<Zoom | null>(null);
+  // Ручные ширины колонок (px); undefined — дефолт из CSS.
+  const [colWidths, setColWidths] = useState<Partial<Record<SortKey, number>>>({});
+  const thRefs = useRef<Partial<Record<SortKey, HTMLTableCellElement | null>>>({});
+
+  // onResizeStart — drag правого края колонки: стартовая ширина берётся из
+  // реально отрендеренного th (учитывает и дефолт CSS, и предшествующий
+  // drag), дальше — mousemove по окну до mouseup.
+  const onResizeStart = (col: SortKey) => (e: ReactMouseEvent) => {
+    e.preventDefault();
+    const th = thRefs.current[col];
+    if (!th) {
+      return;
+    }
+    const startX = e.clientX;
+    const startW = th.getBoundingClientRect().width;
+    let moved = false;
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - startX;
+      if (dx === 0) {
+        return;
+      }
+      moved = true;
+      setColWidths((prev) => ({
+        ...prev,
+        [col]: Math.max(MIN_COL_WIDTH[col], startW + dx),
+      }));
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      // Если колонку таскали, следующий click (обычно по th) не должен
+      // переключить сортировку.
+      if (moved) {
+        const suppress = (ev: Event) => {
+          ev.stopPropagation();
+          ev.preventDefault();
+        };
+        window.addEventListener('click', suppress, { capture: true, once: true });
+      }
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
 
   const sorted = useMemo(() => {
     const arr = [...files];
@@ -151,25 +209,85 @@ export default function FilesTable({
                   />
                 </th>
                 <th className="col-thumb" aria-hidden />
-                <th className="sortable" onClick={() => toggleSort('name')}>
+                <th
+                  className="sortable"
+                  ref={(el) => {
+                    thRefs.current.name = el;
+                  }}
+                  style={colWidths.name != null ? { width: colWidths.name } : undefined}
+                  onClick={() => toggleSort('name')}
+                >
                   {t('colName')}
                   {arrow('name')}
+                  <span
+                    className="th-resize"
+                    onMouseDown={onResizeStart('name')}
+                    onClick={(e) => e.stopPropagation()}
+                  />
                 </th>
-                <th className="sortable num col-size" onClick={() => toggleSort('size')}>
+                <th
+                  className="sortable num col-size"
+                  ref={(el) => {
+                    thRefs.current.size = el;
+                  }}
+                  style={colWidths.size != null ? { width: colWidths.size } : undefined}
+                  onClick={() => toggleSort('size')}
+                >
                   {t('colSize')}
                   {arrow('size')}
+                  <span
+                    className="th-resize"
+                    onMouseDown={onResizeStart('size')}
+                    onClick={(e) => e.stopPropagation()}
+                  />
                 </th>
-                <th className="sortable col-date" onClick={() => toggleSort('date')}>
+                <th
+                  className="sortable col-date"
+                  ref={(el) => {
+                    thRefs.current.date = el;
+                  }}
+                  style={colWidths.date != null ? { width: colWidths.date } : undefined}
+                  onClick={() => toggleSort('date')}
+                >
                   {t('colDate')}
                   {arrow('date')}
+                  <span
+                    className="th-resize"
+                    onMouseDown={onResizeStart('date')}
+                    onClick={(e) => e.stopPropagation()}
+                  />
                 </th>
-                <th className="sortable num col-time" onClick={() => toggleSort('time')}>
+                <th
+                  className="sortable num col-time"
+                  ref={(el) => {
+                    thRefs.current.time = el;
+                  }}
+                  style={colWidths.time != null ? { width: colWidths.time } : undefined}
+                  onClick={() => toggleSort('time')}
+                >
                   {t('colTime')}
                   {arrow('time')}
+                  <span
+                    className="th-resize"
+                    onMouseDown={onResizeStart('time')}
+                    onClick={(e) => e.stopPropagation()}
+                  />
                 </th>
-                <th className="sortable num col-plastic" onClick={() => toggleSort('plastic')}>
+                <th
+                  className="sortable num col-plastic"
+                  ref={(el) => {
+                    thRefs.current.plastic = el;
+                  }}
+                  style={colWidths.plastic != null ? { width: colWidths.plastic } : undefined}
+                  onClick={() => toggleSort('plastic')}
+                >
                   {t('colPlastic')}
                   {arrow('plastic')}
+                  <span
+                    className="th-resize"
+                    onMouseDown={onResizeStart('plastic')}
+                    onClick={(e) => e.stopPropagation()}
+                  />
                 </th>
               </tr>
             </thead>
