@@ -63,6 +63,11 @@ export interface PrinterStatus {
      * код модели, например "F005"
      */
     "Model": string;
+
+    /**
+     * версия прошивки (DWIN sw ver), "" — неизвестна
+     */
+    "FirmwareVersion": string;
 }
 
 /**

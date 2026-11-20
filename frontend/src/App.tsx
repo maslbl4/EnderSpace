@@ -239,8 +239,10 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
     }
   };
 
+  // «Ender-3 V3 KE · V1.1.0.15 · 192.168.3.166»; версия прошивки — если
+  // принтер её сообщил (поле modelVersion в WS-снимке).
   const label = status?.IP
-    ? `${modelName(status.Model)} · ${status.IP}`
+    ? `${modelName(status.Model)}${status.FirmwareVersion ? ` · ${status.FirmwareVersion}` : ''} · ${status.IP}`
     : t('connectSubtitle');
 
   return (
