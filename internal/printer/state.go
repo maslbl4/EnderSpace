@@ -1,4 +1,4 @@
-package creality
+package printer
 
 import (
 	"encoding/json"
@@ -8,7 +8,9 @@ import (
 
 // State — накопленное состояние принтера: первое WS-сообщение — полный
 // снимок, далее принтер шлёт дельты; Merge складывает их в одну картину
-// (незаполненные поля дельты НЕ затирают прежние значения).
+// (незаполненные поля дельты НЕ затирают прежние значения). Общий для
+// обоих драйверов: Creality шлёт дельты состояния, Moonraker — дельты
+// objects (print_stats и т.п.).
 type State struct {
 	data map[string]json.RawMessage
 }

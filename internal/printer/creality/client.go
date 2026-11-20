@@ -288,7 +288,7 @@ func (c *Client) WatchStatus(ctx context.Context, fn func(printer.DeviceStatus))
 		conn.Close()
 	}()
 
-	state := NewState()
+	state := printer.NewState()
 	_ = conn.SetReadDeadline(time.Now().Add(silenceTimeout))
 	for {
 		if err := ctx.Err(); err != nil {
@@ -320,7 +320,7 @@ func (c *Client) WatchStatus(ctx context.Context, fn func(printer.DeviceStatus))
 // и в простое даёт ложную метку. Значения — из statusArr UI принтера:
 // 1="Printing", 5="Printing Paused" (работа идёт). Версия прошивки (DWIN sw
 // ver) — из modelVersion; нет/пусто → "".
-func statusFromState(s *State) printer.DeviceStatus {
+func statusFromState(s *printer.State) printer.DeviceStatus {
 	ds := printer.DeviceStatus{}
 	if mv, ok := s.Str("modelVersion"); ok {
 		ds.Firmware = FirmwareVersion(mv)

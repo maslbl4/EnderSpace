@@ -22,7 +22,7 @@ export interface FileMeta {
     "Size": number;
 
     /**
-     * unix-time загрузки (из WS-списка; 0 — неизвестно)
+     * unix-time загрузки (из списка; 0 — неизвестно)
      */
     "Epoch": number;
 
@@ -50,7 +50,7 @@ export interface PrinterStatus {
     "Connected": boolean;
 
     /**
-     * принтер сейчас печатает (если API сообщает)
+     * принтер сейчас печатает (если драйвер сообщает)
      */
     "Printing": boolean;
 
@@ -65,14 +65,14 @@ export interface PrinterStatus {
     "Model": string;
 
     /**
-     * версия прошивки (DWIN sw ver), "" — неизвестна
+     * версия прошивки ("" — неизвестна)
      */
     "FirmwareVersion": string;
 }
 
 /**
- * Storage — ёмкость внутренней памяти (eMMC). Total и System — оценки
- * (константы из конфига), т.к. у принтера нет df-эндпоинта.
+ * Storage — ёмкость внутренней памяти. Total и System — оценки (константы
+ * из конфига), т.к. у принтера нет df-эндпоинта.
  */
 export interface Storage {
     "Total": number;

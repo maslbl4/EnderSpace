@@ -53,16 +53,18 @@ export function ListFiles(): $CancellablePromise<printer$0.FileMeta[] | null> {
 
 /**
  * StartPrint запускает печать одного файла (full — «<path>/<name>») и ждёт
- * подтверждения: принтер, как и с deleteprt, не шлёт ack на printprt —
- * подтверждением служит push состояния, где printFileName совпал с файлом
- * и state ∈ {1,5} («Printing»/«Paused»).
+ * подтверждения: драйвер, как и при deleteprt, не даёт ack — подтверждением
+ * служит следующий DeviceStatus, где принтер уже «печатает» и путь совпал
+ * с файлом.
  */
 export function StartPrint(full: string): $CancellablePromise<void> {
     return $Call.ByID(56200444, full);
 }
 
 /**
- * Status — текущее состояние подключения.
+ * Status — текущее состояние подключения. Поля состояния (печатает/прошивка)
+ * — из последнего DeviceStatus, который прислал драйвер: нормализация сырых
+ * полей протокола (state, modelVersion) — ответственность драйвера.
  */
 export function Status(): $CancellablePromise<printer$0.PrinterStatus> {
     return $Call.ByID(602860533);
