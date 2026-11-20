@@ -487,12 +487,14 @@ body {
 }
 
 /* Files table. Карточка таблицы занимает всё оставшееся вертикальное
-   пространство окна, таблица внутри скроллится. */
+   пространство окна, таблица внутри скроллится. no-drag: в этой зоне
+   перетаскивают колонки и выделяют текст, а не окно. */
 .files-card {
     flex: 1 1 auto;
     min-height: 0;
     display: flex;
     flex-direction: column;
+    --wails-draggable: no-drag;
 }
 .table-wrap {
     flex: 1 1 auto;
@@ -524,13 +526,13 @@ body {
     top: 0;
     background: rgba(13, 17, 28, 0.92);
 }
-/* Ручка ресайза колонки: узкая зона на правом крае заголовка,
-   подсвечивается при наведении. */
+/* Ручка ресайза колонки: зона 10px на правом крае заголовка. Полоска
+   всегда видна (тонкая светлая линия), при наведении становится розовой. */
 .th-resize {
     position: absolute;
     top: 0;
-    right: -3px;
-    width: 7px;
+    right: -5px;
+    width: 10px;
     height: 100%;
     cursor: col-resize;
     z-index: 1;
@@ -538,15 +540,15 @@ body {
 .th-resize::after {
     content: '';
     position: absolute;
-    top: 25%;
-    bottom: 25%;
-    left: 3px;
+    top: 20%;
+    bottom: 20%;
+    left: 4px;
     width: 2px;
     border-radius: 1px;
-    background: transparent;
+    background: rgba(255, 255, 255, 0.2);
     transition: background 0.12s ease;
 }
-.th-resize:hover::after { background: rgba(255, 45, 114, 0.85); }
+.th-resize:hover::after { background: rgba(255, 45, 114, 0.95); }
 .files-table tbody tr { border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
 .files-table tbody tr:hover { background: var(--glass-strong); }
 .files-table .num { text-align: right; font-variant-numeric: tabular-nums; }
