@@ -205,16 +205,26 @@ export default function FilesTable({
     <>
     <section className={`card files-card${collapsed ? ' files-card-collapsed' : ''}`}>
       <h2 className="card-title">
-        <button
-          type="button"
+        {/* Спан, а не <button>: baseline кнопки — нижняя кромка элемента,
+            и flex align-items: baseline с ней «съезжает». У спана baseline
+            — по тексту, шеврон садится на ту же baseline, что и «Файлы». */}
+        <span
           className="collapse-btn"
-          onClick={onToggleCollapsed}
+          role="button"
+          tabIndex={0}
           aria-expanded={!collapsed}
           aria-label={collapsed ? t('expand') : t('collapse')}
           title={collapsed ? t('expand') : t('collapse')}
+          onClick={onToggleCollapsed}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onToggleCollapsed();
+            }
+          }}
         >
           {collapsed ? '▸' : '▾'}
-        </button>
+        </span>
         <span className="card-title-text" onClick={onToggleCollapsed}>
           {t('filesTitle')}
           {!loading ? ` (${files.length})` : ''}

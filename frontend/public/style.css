@@ -388,21 +388,24 @@ body {
     letter-spacing: 0.01em;
     color: var(--text);
     display: flex;
-    align-items: center;
+    align-items: baseline;
     gap: 2px;
 }
-/* Кнопка-шеvron сворачивания карточки: клик по ней или по тексту заголовка. */
+/* Шеврон сворачивания: span (не button — у кнопки baseline на нижней
+   кромке, и выровнять его по тексту не получается). Кликается сам и
+   текст заголовка; с клавиатуры — Enter/Space. */
 .collapse-btn {
-    background: none;
-    border: none;
-    padding: 2px 5px;
-    margin: 0;
     font-size: 26px;
     line-height: 1;
     color: var(--muted);
     cursor: pointer;
+    padding: 0 4px;
 }
 .collapse-btn:hover { color: var(--accent-2); }
+.collapse-btn:focus-visible {
+    outline: 2px solid var(--accent-2);
+    outline-offset: 2px;
+}
 .card-title-text { cursor: pointer; user-select: none; }
 .card-title-text:hover { color: var(--accent-2); }
 
