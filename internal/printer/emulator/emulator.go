@@ -170,7 +170,7 @@ func (e *Emulator) PrintFile(ctx context.Context, path, name string) error {
 // DownloadGcode — синтетический G-код: заголовок слайсера (время, длина
 // филамента, плотность), чтобы обогащение шло по тем же путям, что на
 // реальном принтере.
-func (e *Emulator) DownloadGcode(ctx context.Context, name string) (io.ReadCloser, error) {
+func (e *Emulator) DownloadGcode(ctx context.Context, path, name string) (io.ReadCloser, error) {
 	e.mu.Lock()
 	body, ok := e.bodies[name]
 	e.mu.Unlock()
@@ -181,7 +181,7 @@ func (e *Emulator) DownloadGcode(ctx context.Context, name string) (io.ReadClose
 }
 
 // DownloadThumbnail — вшитый 1×1 PNG; 404 у файлов без превью.
-func (e *Emulator) DownloadThumbnail(ctx context.Context, name string) (io.ReadCloser, error) {
+func (e *Emulator) DownloadThumbnail(ctx context.Context, path, name string) (io.ReadCloser, error) {
 	e.mu.Lock()
 	png, ok := e.thumbs[name]
 	e.mu.Unlock()

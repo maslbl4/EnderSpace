@@ -351,7 +351,7 @@ func (a *App) enrich(ctx context.Context, client printer.Printer, rf printer.Fil
 	a.mu.Unlock()
 	if !cached {
 		var ok bool
-		info, ok = a.downloadHeadWithRetries(ctx, client, rf.Name)
+		info, ok = a.downloadHeadWithRetries(ctx, client, rf.Path, rf.Name)
 		// Фолбэки (время из имени, граммы из length) применяем всегда —
 		// они работают и при провале докачки. В кэш уходит только
 		// успешно скачанный заголовок.
@@ -395,13 +395,13 @@ func anyError(error) bool { return true }
 
 // downloadHeadWithRetries — скачивание заголовка G-кода с ретраями.
 // ok=false — все попытки провалились (или фаза отменена).
-func (a *App) downloadHeadWithRetries(ctx context.Context, client printer.Printer, name string) (gcode.Info, bool) {
+func (a *App) downloadHeadWithRetries(ctx context.Context, client printer.Printer, path, name string) (gcode.Info, bool) {
 	var (
 		info gcode.Info
 		ok   bool
 	)
 	err := withRetries(ctx, anyError, func(ctx context.Context) error {
-		info, ok = downloadHead(ctx, client, name)
+		info, ok = downloadHead(ctx, client, path, name)
 		if !ok {
 			return errors.New("докачка заголовка не удалась")
 		}
@@ -413,8 +413,8 @@ func (a *App) downloadHeadWithRetries(ctx context.Context, client printer.Printe
 // downloadHead скачивает G-код и возвращает результат парсинга его
 // заголовка. ok=false — скачивание/парсинг не удалось. Принтер Range
 // игнорирует, поэтому читаем только gcodeHeadBytes.
-func downloadHead(ctx context.Context, client printer.Printer, name string) (gcode.Info, bool) {
-	rc, err := client.DownloadGcode(ctx, name)
+func downloadHead(ctx context.Context, client printer.Printer, path, name string) (gcode.Info, bool) {
+	rc, err := client.DownloadGcode(ctx, path, name)
 	if err != nil {
 		return gcode.Info{}, false
 	}
@@ -448,7 +448,7 @@ func (a *App) thumb(ctx context.Context, client printer.Printer, rf printer.File
 			// 404 — окончательный ответ «превью нет», ретраить нечего.
 			func(err error) bool { return !errors.Is(err, printer.ErrNotFound) },
 			func(ctx context.Context) error {
-				rc, err := client.DownloadThumbnail(ctx, rf.Name)
+				rc, err := client.DownloadThumbnail(ctx, rf.Path, rf.Name)
 				if err != nil {
 					return err
 				}

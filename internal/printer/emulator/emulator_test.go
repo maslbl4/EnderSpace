@@ -59,7 +59,7 @@ func TestListFilesAndDelete(t *testing.T) {
 		}
 	}
 	// Удалённый файл не качается (404).
-	if _, err := e.DownloadGcode(ctx, target.Name); !errors.Is(err, printer.ErrNotFound) {
+	if _, err := e.DownloadGcode(ctx, target.Path, target.Name); !errors.Is(err, printer.ErrNotFound) {
 		t.Errorf("DownloadGcode после удаления: err = %v, want 404", err)
 	}
 	// Несуществующий файл — ошибка.
@@ -71,9 +71,10 @@ func TestListFilesAndDelete(t *testing.T) {
 func TestDownloads(t *testing.T) {
 	e := New()
 	ctx := context.Background()
+	const dir = "/usr/data/printer_data/gcodes"
 
 	// G-код: заголовок, который парсер обогащения понимает (время + мм).
-	rc, err := e.DownloadGcode(ctx, "benchy_PLA_1h15m.gcode")
+	rc, err := e.DownloadGcode(ctx, dir, "benchy_PLA_1h15m.gcode")
 	if err != nil {
 		t.Fatalf("DownloadGcode: %v", err)
 	}
@@ -83,12 +84,12 @@ func TestDownloads(t *testing.T) {
 		!strings.Contains(string(body), "filament used [mm]") {
 		t.Errorf("синтетический G-код без заголовка: %q", body)
 	}
-	if _, err := e.DownloadGcode(ctx, "nope.gcode"); !errors.Is(err, printer.ErrNotFound) {
+	if _, err := e.DownloadGcode(ctx, dir, "nope.gcode"); !errors.Is(err, printer.ErrNotFound) {
 		t.Errorf("DownloadGcode для неизвестного файла: err = %v, want 404", err)
 	}
 
 	// Превью: у большинства есть, у nothumb — 404.
-	rc, err = e.DownloadThumbnail(ctx, "vase_spiralize.gcode")
+	rc, err = e.DownloadThumbnail(ctx, dir, "vase_spiralize.gcode")
 	if err != nil {
 		t.Fatalf("DownloadThumbnail: %v", err)
 	}
@@ -97,7 +98,7 @@ func TestDownloads(t *testing.T) {
 	if len(png) == 0 || png[0] != 0x89 {
 		t.Error("пустое или не-PNG превью")
 	}
-	if _, err := e.DownloadThumbnail(ctx, "nothumb_raw_dump.gcode"); !errors.Is(err, printer.ErrNotFound) {
+	if _, err := e.DownloadThumbnail(ctx, dir, "nothumb_raw_dump.gcode"); !errors.Is(err, printer.ErrNotFound) {
 		t.Errorf("DownloadThumbnail nothumb: err = %v, want 404", err)
 	}
 }

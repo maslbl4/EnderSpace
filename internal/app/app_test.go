@@ -113,7 +113,7 @@ func (m *mockPrinter) removeFile(pathName string) {
 	m.files = out
 }
 
-func (m *mockPrinter) DownloadGcode(ctx context.Context, name string) (io.ReadCloser, error) {
+func (m *mockPrinter) DownloadGcode(ctx context.Context, path, name string) (io.ReadCloser, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.downloadErr[name]; err != nil {
@@ -130,7 +130,7 @@ func (m *mockPrinter) DownloadGcode(ctx context.Context, name string) (io.ReadCl
 	return io.NopCloser(bytes.NewReader(body)), nil
 }
 
-func (m *mockPrinter) DownloadThumbnail(ctx context.Context, name string) (io.ReadCloser, error) {
+func (m *mockPrinter) DownloadThumbnail(ctx context.Context, path, name string) (io.ReadCloser, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if n := m.thumbFlaky[name]; n > 0 {
@@ -716,17 +716,17 @@ func (c *countingDownloader) DeleteFile(ctx context.Context, path, name string) 
 func (c *countingDownloader) PrintFile(ctx context.Context, path, name string) error {
 	return c.m.PrintFile(ctx, path, name)
 }
-func (c *countingDownloader) DownloadGcode(ctx context.Context, name string) (io.ReadCloser, error) {
+func (c *countingDownloader) DownloadGcode(ctx context.Context, path, name string) (io.ReadCloser, error) {
 	if c.n != nil {
 		*c.n += 1
 	}
-	return c.m.DownloadGcode(ctx, name)
+	return c.m.DownloadGcode(ctx, path, name)
 }
-func (c *countingDownloader) DownloadThumbnail(ctx context.Context, name string) (io.ReadCloser, error) {
+func (c *countingDownloader) DownloadThumbnail(ctx context.Context, path, name string) (io.ReadCloser, error) {
 	if c.nThumb != nil {
 		*c.nThumb += 1
 	}
-	return c.m.DownloadThumbnail(ctx, name)
+	return c.m.DownloadThumbnail(ctx, path, name)
 }
 func (c *countingDownloader) WatchStatus(ctx context.Context, fn func(printer.DeviceStatus)) error {
 	return c.m.WatchStatus(ctx, fn)

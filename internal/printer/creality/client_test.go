@@ -243,7 +243,7 @@ func TestPrintFile(t *testing.T) {
 
 func TestDownloadGcode(t *testing.T) {
 	tp := newTestPrinter(t)
-	rc, err := tp.client().DownloadGcode(context.Background(), "a.gcode")
+	rc, err := tp.client().DownloadGcode(context.Background(), "/usr/data/printer_data/gcodes", "a.gcode")
 	if err != nil {
 		t.Fatalf("DownloadGcode: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestDownloadGcode(t *testing.T) {
 
 func TestDownloadGcodeNotFound(t *testing.T) {
 	tp := newTestPrinter(t)
-	rc, err := tp.client().DownloadGcode(context.Background(), "missing.gcode")
+	rc, err := tp.client().DownloadGcode(context.Background(), "/usr/data/printer_data/gcodes", "missing.gcode")
 	if err == nil {
 		rc.Close()
 		t.Fatal("DownloadGcode для несуществующего файла: ожидалась ошибка")
@@ -265,7 +265,7 @@ func TestDownloadGcodeNotFound(t *testing.T) {
 
 func TestDownloadThumbnail(t *testing.T) {
 	tp := newTestPrinter(t)
-	rc, err := tp.client().DownloadThumbnail(context.Background(), "a.gcode")
+	rc, err := tp.client().DownloadThumbnail(context.Background(), "/usr/data/printer_data/gcodes", "a.gcode")
 	if err != nil {
 		t.Fatalf("DownloadThumbnail: %v", err)
 	}

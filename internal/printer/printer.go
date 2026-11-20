@@ -23,9 +23,10 @@ type Printer interface {
 	// PrintFile — запустить печать G-кода.
 	PrintFile(ctx context.Context, path, name string) error
 	// DownloadGcode — поток G-кода (обогащение: время/граммы из заголовка).
-	DownloadGcode(ctx context.Context, name string) (io.ReadCloser, error)
-	// DownloadThumbnail — поток PNG-превью G-кода.
-	DownloadThumbnail(ctx context.Context, name string) (io.ReadCloser, error)
+	// path — каталог файла в памяти принтера ("" — корень списка).
+	DownloadGcode(ctx context.Context, path, name string) (io.ReadCloser, error)
+	// DownloadThumbnail — поток PNG-превью G-кода ("" — превью нет).
+	DownloadThumbnail(ctx context.Context, path, name string) (io.ReadCloser, error)
 	// WatchStatus — наблюдение за состоянием устройства: драйвер сам
 	// складывает снимки/дельты своего протокола в DeviceStatus и вызывает
 	// fn на каждое обновление. Возвращает при отмене ctx или обрыве связи.
@@ -43,7 +44,9 @@ type Info struct {
 }
 
 // File — один G-код в памяти принтера (общий тип; драйвер мапит wire-формат
-// своего протокола в него).
+// своего протокола в него). Path — каталог файла (в Creality — полный путь
+// на принтере, в Moonraker — путь относительно gcode-корня, "" — корень);
+// "Path/Name" — полный путь, которым слой приложения управляет файлом.
 type File struct {
 	Path       string
 	Name       string
