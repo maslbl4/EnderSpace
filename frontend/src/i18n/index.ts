@@ -1,5 +1,6 @@
 // i18n: выбор языка (русский / английский). Единая точка входа — t(key).
-// Язык хранится в localStorage и переключается в любое время:
+// Первый запуск — язык ОС (navigator.language), дальше выбор
+// пользователя хранится в localStorage и переключается в любое время:
 // компоненты, вызывающие useI18n(), перерисовываются при смене.
 import { useSyncExternalStore } from 'react';
 import { ru } from './ru';
@@ -21,9 +22,12 @@ function initialLang(): Lang {
       return v;
     }
   } catch {
-    /* localStorage недоступен — русский по умолчанию */
+    /* localStorage недоступен — падаем на язык ОС */
   }
-  return 'ru';
+  // Сохранённого выбора нет — берём из ОС: WebView2/Chromium сообщают
+  // системный локаль в navigator.language (например «ru-RU», «en-US»).
+  const nav = typeof navigator !== 'undefined' ? navigator.language : '';
+  return nav.toLowerCase().startsWith('ru') ? 'ru' : 'en';
 }
 
 let lang: Lang = initialLang();
