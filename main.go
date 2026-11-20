@@ -2,11 +2,14 @@ package main
 
 import (
 	"embed"
+	"flag"
 	"log"
 	"os"
 	"path/filepath"
 
 	"ender-space/internal/app"
+	"ender-space/internal/printer"
+	"ender-space/internal/printer/emulator"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -20,12 +23,25 @@ import (
 var assets embed.FS
 
 func main() {
+	// Отладочный режим: in-memory эмулятор принтера вместо реального —
+	// ENDERSPACE_EMULATOR=1 (dev, переменная достаётся дочернему процессу)
+	// или -emulator (собранное exe). IP из формы принимается любой.
+	emulatorMode := flag.Bool("emulator", false, "запустить с in-memory эмулятором принтера (отладка)")
+	flag.Parse()
+
 	// Сервис приложения: подключение к принтеру, память, файлы, удаление.
 	// События обогащения (files:progress / files:enriched / files:done)
 	// уходят во фронтенд через Wails-рантайм.
-	svc := app.NewAppWithSink(configDir(), func(name string, data any) {
+	sink := func(name string, data any) {
 		_ = application.Get().Event.Emit(name, data)
-	})
+	}
+	var svc *app.App
+	if *emulatorMode || os.Getenv("ENDERSPACE_EMULATOR") == "1" {
+		svc = app.NewAppWithClientAndSink(configDir(),
+			func(ip string) printer.Printer { return emulator.New() }, sink)
+	} else {
+		svc = app.NewAppWithSink(configDir(), sink)
+	}
 
 	wapp := application.New(application.Options{
 		Name:        "ender-space",

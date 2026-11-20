@@ -24,6 +24,26 @@ go test ./internal/... -count=1
 - Модель по `GET /info`: `F005` (Ender-3 V3 KE), eMMC 8 GB (общая с прошивкой)
 - Живые проверки — как Go-тесты с `ENDERSPACE_LIVE=1` (см. `internal/app/*_test.go`)
 
+## Эмулятор принтера (без железа)
+
+In-memory реализация `printer.Printer` (8 образцовых G-кодов, печать ускорена
+до 1 минуты) — весь UI-флоу проверяется без принтера:
+
+```powershell
+$env:ENDERSPACE_EMULATOR=1; wails3 dev        # dev
+build\bin\ender-space.exe -emulator           # собранное exe
+$env:ENDERSPACE_EMU_PRINT_MS=10000            # (опц.) печать за 10 с
+```
+
+IP из формы подключения принимается любой.
+
+## Драйверы принтеров
+
+`internal/printer` — общий интерфейс `printer.Printer` и общие типы; драйвер
+Creality F005 (HTTP+WS) — `internal/printer/creality`. Новый принтер или та же
+модель с другой ОС — соседний пакет драйвера, слой приложения и фронтенд не
+меняются. Протокол F005 описан в [`docs/api-contract.md`](docs/api-contract.md).
+
 ## Ограничения окружения
 
 - PowerShell: `curl` = `Invoke-WebRequest` (использовать `curl.exe`)
