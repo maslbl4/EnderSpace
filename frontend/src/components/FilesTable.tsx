@@ -14,13 +14,16 @@ type SortKey = 'name' | 'size' | 'date' | 'time' | 'plastic';
 
 // Ресайз колонок мышкой: перетаскиваются все, кроме чекбокса и превью.
 // Ширины живут только в состоянии (между запусками не сохраняются).
+// Минимумы — по ширине заголовка: текст «Загружен»/«Пластик» не обрывается.
 const MIN_COL_WIDTH: Record<SortKey, number> = {
-  name: 120,
-  size: 60,
-  date: 60,
-  time: 60,
-  plastic: 60,
+  name: 140,
+  size: 80,
+  date: 100,
+  time: 90,
+  plastic: 90,
 };
+// Фиксированные колонки (чекбокс 34px + превью 52px) для расчёта максимума.
+const FIXED_COLS_WIDTH = 34 + 52;
 
 // zoom — увеличенное превью (по центру окна, позиция в CSS).
 type Zoom = { src: string };
@@ -51,7 +54,11 @@ export default function FilesTable({
 
   // onResizeStart — drag правого края колонки: стартовая ширина берётся из
   // реально отрендеренного th (учитывает и дефолт CSS, и предшествующий
-  // drag), дальше — mousemove по окну до mouseup.
+  // drag), дальше — mousemove по окну до mouseup. Защита от рывков:
+  // целые пиксели (дробные ширины дёргают раскладку), пропуск обновлений
+  // без изменения и потолок — колонка не может зажать соседние ниже их
+  // текущей ширины (иначе таблица вылезла бы в горизонтальный скроллбар
+  // посреди перетаскивания).
   const onResizeStart = (col: SortKey) => (e: ReactMouseEvent) => {
     e.preventDefault();
     const th = thRefs.current[col];
@@ -60,16 +67,28 @@ export default function FilesTable({
     }
     const startX = e.clientX;
     const startW = th.getBoundingClientRect().width;
+    const lo = MIN_COL_WIDTH[col];
+    const others = (Object.keys(MIN_COL_WIDTH) as SortKey[])
+      .filter((c) => c !== col)
+      .reduce((sum, c) => {
+        const el = thRefs.current[c];
+        const cur = el ? el.getBoundingClientRect().width : MIN_COL_WIDTH[c];
+        return sum + Math.max(MIN_COL_WIDTH[c], cur);
+      }, 0);
+    const wrap = th.closest('.table-wrap');
+    const hi = wrap ? Math.max(lo, wrap.clientWidth - others - FIXED_COLS_WIDTH) : Number.POSITIVE_INFINITY;
+    let lastW = -1;
     let moved = false;
     const onMove = (ev: MouseEvent) => {
-      const dx = ev.clientX - startX;
-      if (dx === 0) {
+      const nw = Math.min(hi, Math.max(lo, Math.round(startW + (ev.clientX - startX))));
+      if (nw === lastW) {
         return;
       }
+      lastW = nw;
       moved = true;
       setColWidths((prev) => ({
         ...prev,
-        [col]: Math.max(MIN_COL_WIDTH[col], startW + dx),
+        [col]: nw,
       }));
     };
     const onUp = () => {
