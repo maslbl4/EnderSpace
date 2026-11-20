@@ -1,7 +1,9 @@
 # EnderSpace
 
 Менеджер внутренней памяти Creality Ender-3 V3 KE (Go + Wails v3 + React/TS).
-Протокол принтера: [`docs/api-contract.md`](docs/api-contract.md) (HTTP :80 + WS :9999, не Moonraker).
+Поддерживается стоковая прошивка Creality (HTTP :80 + WS :9999, протокол:
+[`docs/api-contract.md`](docs/api-contract.md)) и NebulaOS (Klipper + Moonraker, :7125).
+Драйвер определяется автоматически при подключении (см. «Драйверы принтеров»).
 
 ## Сборка и тесты (Windows, нативно)
 
@@ -39,10 +41,22 @@ IP из формы подключения принимается любой.
 
 ## Драйверы принтеров
 
-`internal/printer` — общий интерфейс `printer.Printer` и общие типы; драйвер
-Creality F005 (HTTP+WS) — `internal/printer/creality`. Новый принтер или та же
-модель с другой ОС — соседний пакет драйвера, слой приложения и фронтенд не
-меняются. Протокол F005 описан в [`docs/api-contract.md`](docs/api-contract.md).
+`internal/printer` — общий интерфейс `printer.Printer` и общие типы; каждый
+драйвер — соседний пакет, слой приложения и фронтенд не меняются:
+
+- `internal/printer/creality` — стоковая прошивка F005 (HTTP :80 + WS :9999),
+  протокол: [`docs/api-contract.md`](docs/api-contract.md);
+- `internal/printer/nebulaos` — NebulaOS (Klipper + Moonraker: REST + WS
+  JSON-RPC на :7125). Версия ОС — `GET /machine/nebulaos/info`
+  (`build.nebulaos_version`), фолбэк — `klipper_version` из `/server/info`.
+  Путь файла в Moonraker — относительно gcode-корня; драйвер мапит его в
+  `File.Path` с префиксом `gcodes/`, поэтому «Path/Name» совпадает с
+  `print_stats.filename`.
+
+Детект драйвера при `Connect` — `internal/app/detect.go`: сначала зонд
+Creality (`GET /info`), не вышло — NebulaOS (`GET /server/info`). Живая
+проверка NebulaOS: `TestLiveNebulaos` с `ENDERSPACE_LIVE=1`
+(после прошивки принтера; сейчас — только mock-тесты на httptest).
 
 ## Ограничения окружения
 

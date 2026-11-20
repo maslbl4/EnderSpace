@@ -19,7 +19,6 @@ import (
 	"ender-space/internal/config"
 	"ender-space/internal/gcode"
 	"ender-space/internal/printer"
-	"ender-space/internal/printer/creality"
 )
 
 // EventSink — отправка событий в фронтенд (в main — Wails-рантайм;
@@ -80,11 +79,10 @@ func NewApp(cfgDir string) *App {
 }
 
 // NewAppWithSink — то же, но события обогащения уходят в sink
-// (в main — Wails-рантайм).
+// (в main — Wails-рантайм). Драйвер (стоковая прошивка Creality или
+// NebulaOS/Moonraker) определяется автоматически при подключении.
 func NewAppWithSink(cfgDir string, sink EventSink) *App {
-	return NewAppWithClientAndSink(cfgDir, func(ip string) printer.Printer {
-		return creality.New("http://" + ip)
-	}, sink)
+	return NewAppWithClientAndSink(cfgDir, detectDriver, sink)
 }
 
 // NewAppWithClient — то же, но фабрика принтера задаётся снаружи (тесты).

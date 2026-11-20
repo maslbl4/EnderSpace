@@ -23,10 +23,25 @@ func TestLiveEnrichAllFiles(t *testing.T) {
 	if os.Getenv("ENDERSPACE_LIVE") != "1" {
 		t.Skip("live-тест: задайте ENDERSPACE_LIVE=1")
 	}
-	const ip = "192.168.3.166"
+	runLiveEnrich(t, "192.168.3.166",
+		func(s string) printer.Printer { return creality.New("http://" + s) })
+}
+
+// Живая проверка с NebulaOS: тот же цикл, но драйвер определяется
+// автоматически (после прошивки принтера в NebulaOS — драйвер Moonraker).
+// Запуск: $env:ENDERSPACE_LIVE=1; go test ./internal/app/ -run TestLiveNebulaos -v
+func TestLiveNebulaos(t *testing.T) {
+	if os.Getenv("ENDERSPACE_LIVE") != "1" {
+		t.Skip("live-тест: задайте ENDERSPACE_LIVE=1")
+	}
+	runLiveEnrich(t, "192.168.3.166", detectDriver)
+}
+
+// runLiveEnrich — общий цикл живого обогащения (см. TestLiveEnrichAllFiles).
+func runLiveEnrich(t *testing.T, ip string, factory func(string) printer.Printer) {
+	t.Helper()
 	rec := newEventRecorder()
-	app := NewAppWithClientAndSink(t.TempDir(),
-		func(s string) printer.Printer { return creality.New("http://" + s) }, rec.sink)
+	app := NewAppWithClientAndSink(t.TempDir(), factory, rec.sink)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	if err := app.Connect(ctx, ip); err != nil {
