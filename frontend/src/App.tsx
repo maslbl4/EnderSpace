@@ -336,7 +336,10 @@ function MainScreen({ onDisconnected }: { onDisconnected: () => void }) {
         />
       ) : null}
 
-      {tableReady && files !== null && !filesCollapsed ? (
+      {/* Панель выбора (выбрано/размер + Печать/Удалить) — отдельно от
+          таблицы: сворачивание сжимает только таблицу, кнопки доступны
+          всегда для быстрого действия. */}
+      {tableReady && files !== null ? (
         <div className="footer-bar">
           <span className="footer-info">
             {t('selected')}: {selectedList.length}{' '}
