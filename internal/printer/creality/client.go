@@ -79,6 +79,9 @@ func hostOnly(base string) string {
 	return host
 }
 
+// DriverName — имя драйвера в конфиге (lastDriver).
+func (c *Client) DriverName() string { return "creality" }
+
 // Info — GET /info (mac, модель).
 func (c *Client) Info(ctx context.Context) (printer.Info, error) {
 	var raw struct {

@@ -76,6 +76,9 @@ func NewForTest(base, wsURL string) *Client {
 	return c
 }
 
+// DriverName — имя драйвера в конфиге (lastDriver).
+func (c *Client) DriverName() string { return "nebulaos" }
+
 // Info — GET /server/info (проверка связи) + версия NebulaOS.
 // Модель — F005: NebulaOS шьётся только под Ender-3 V3 KE.
 func (c *Client) Info(ctx context.Context) (printer.Info, error) {

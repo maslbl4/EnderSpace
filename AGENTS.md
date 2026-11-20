@@ -54,9 +54,11 @@ IP из формы подключения принимается любой.
   `print_stats.filename`.
 
 Детект драйвера при `Connect` — `internal/app/detect.go`: сначала зонд
-Creality (`GET /info`), не вышло — NebulaOS (`GET /server/info`). Живая
-проверка NebulaOS: `TestLiveNebulaos` с `ENDERSPACE_LIVE=1`
-(после прошивки принтера; сейчас — только mock-тесты на httptest).
+Creality (`GET /info`), не вышло — NebulaOS (`GET /server/info`). Выбранный
+драйвер запоминается в конфиге (`lastDriver`, рядом с `lastIP`) и при
+повторном подключении к тому же IP зондится первым. Живая проверка
+NebulaOS: `TestLiveNebulaos` с `ENDERSPACE_LIVE=1` (после прошивки принтера;
+сейчас — только mock-тесты на httptest).
 
 ## Ограничения окружения
 

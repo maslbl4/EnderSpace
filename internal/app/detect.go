@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 
 	"ender-space/internal/printer"
@@ -12,29 +13,49 @@ import (
 	"ender-space/internal/printer/nebulaos"
 )
 
-// detectDriver — фабрика принтера по умолчанию: одна и та же F005 может
-// работать со стоковой прошивкой Creality (HTTP :80 + WS :9999) и с NebulaOS
-// (Klipper + Moonraker, :7125), поэтому драйвер заранее не известен.
-// Авто-детект — в первом вызове Info (Connect): сначала пробует Creality
-// (GET /info), не вышло — NebulaOS (GET /server/info).
-func detectDriver(ip string) printer.Printer {
-	return newDetectingPrinter(creality.New("http://"+ip), nebulaos.New(ip))
+// Имена драйверов в конфиге (lastDriver) и в ошибках детекта.
+const (
+	DriverCreality = "creality"
+	DriverNebulaOS = "nebulaos"
+)
+
+// detectDriver — фабрика принтера с авто-детектом ОС: одна и та же F005
+// может работать со стоковой прошивкой Creality (HTTP :80 + WS :9999) и с
+// NebulaOS (Klipper + Moonraker, :7125). Порядок зондов по умолчанию —
+// Creality → NebulaOS; preferred (драйвер, которым IP уже подключался,
+// из конфига) зондится первым, поэтому повторное подключение не
+// опрашивает вторую ОС.
+func detectDriver(ip, preferred string) printer.Printer {
+	return newDetectingPrinter(creality.New("http://"+ip), nebulaos.New(ip), preferred)
 }
 
-// detectingPrinter — printer.Printer поверх двух драйверов: активный
-// выбирается в Info (первый вызов слоя приложения при подключении), все
-// остальные методы делегируют ему.
+// detectingPrinter — printer.Printer поверх нескольких драйверов: Info
+// (первый вызов слоя приложения при подключении) зондирует драйверы по
+// очереди, запомнил ответивший — все остальные методы делегируют ему.
 type detectingPrinter struct {
-	mu       sync.Mutex
-	active   printer.Printer
-	creality *creality.Client
-	nebulaos *nebulaos.Client
+	mu         sync.Mutex
+	active     printer.Printer
+	candidates []driverCandidate // в порядке зондирования
 }
 
 var _ printer.Printer = (*detectingPrinter)(nil)
 
-func newDetectingPrinter(c *creality.Client, n *nebulaos.Client) *detectingPrinter {
-	return &detectingPrinter{creality: c, nebulaos: n}
+// driverCandidate — один драйвер с его именем (для порядка зондов и
+// сообщений об ошибках).
+type driverCandidate struct {
+	name   string
+	client printer.Printer
+}
+
+func newDetectingPrinter(c *creality.Client, n *nebulaos.Client, preferred string) *detectingPrinter {
+	candidates := []driverCandidate{
+		{DriverCreality, c},
+		{DriverNebulaOS, n},
+	}
+	if preferred == DriverNebulaOS {
+		candidates[0], candidates[1] = candidates[1], candidates[0]
+	}
+	return &detectingPrinter{candidates: candidates}
 }
 
 // driver — выбранный драйвер; ошибка, если Info ещё не вызывали.
@@ -56,26 +77,32 @@ func (d *detectingPrinter) setActive(c printer.Printer) {
 	d.mu.Unlock()
 }
 
-// Info детектит драйвер (первый вызов) или повторяет проверку активным.
+// Info зондирует драйверы по очереди (или проверяет уже активный) и
+// запоминает ответивший.
 func (d *detectingPrinter) Info(ctx context.Context) (printer.Info, error) {
 	if c, err := d.driver(); err == nil {
 		return c.Info(ctx)
 	}
-
-	// Creality первой: на NebulaOS порт 80 отдаёт веб-интерфейс Mainsail,
-	// где GET /info даёт 404/HTML, — зонд падает быстро и уходит на Moonraker.
-	info, crErr := d.creality.Info(ctx)
-	if crErr == nil {
-		d.setActive(d.creality)
+	var errs []string
+	for _, cand := range d.candidates {
+		info, err := cand.client.Info(ctx)
+		if err != nil {
+			errs = append(errs, cand.name+": "+err.Error())
+			continue
+		}
+		d.setActive(cand.client)
 		return info, nil
 	}
-	info, nbErr := d.nebulaos.Info(ctx)
-	if nbErr != nil {
-		return printer.Info{}, fmt.Errorf(
-			"не удалось определить драйвер принтера: creality: %v; nebulaos: %v", crErr, nbErr)
+	return printer.Info{}, fmt.Errorf("не удалось определить драйвер принтера: %s", strings.Join(errs, "; "))
+}
+
+// DriverName — имя выбранного драйвера (""): Info ещё не вызывался.
+func (d *detectingPrinter) DriverName() string {
+	c, err := d.driver()
+	if err != nil {
+		return ""
 	}
-	d.setActive(d.nebulaos)
-	return info, nil
+	return c.DriverName()
 }
 
 func (d *detectingPrinter) ListFiles(ctx context.Context) ([]printer.File, error) {

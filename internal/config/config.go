@@ -1,5 +1,6 @@
 // Package config — локальный конфиг приложения (config.json в каталоге
-// конфигурации): IP последнего принтера и общая ёмкость eMMC.
+// конфигурации): IP последнего принтера, драйвер, которым он подключился,
+// и общая ёмкость eMMC.
 package config
 
 import (
@@ -23,6 +24,7 @@ const DefaultSystemBytes int64 = 512 * 1024 * 1024
 // Config — настройки приложения.
 type Config struct {
 	LastIP      string `json:"lastIP"`
+	LastDriver  string `json:"lastDriver,omitempty"` // "creality"|"nebulaos"|"emulator"
 	TotalBytes  int64  `json:"totalBytes,omitempty"`
 	SystemBytes int64  `json:"systemBytes,omitempty"`
 }

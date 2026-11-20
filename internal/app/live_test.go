@@ -34,7 +34,8 @@ func TestLiveNebulaos(t *testing.T) {
 	if os.Getenv("ENDERSPACE_LIVE") != "1" {
 		t.Skip("live-тест: задайте ENDERSPACE_LIVE=1")
 	}
-	runLiveEnrich(t, "192.168.3.166", detectDriver)
+	runLiveEnrich(t, "192.168.3.166",
+		func(s string) printer.Printer { return detectDriver(s, "") })
 }
 
 // runLiveEnrich — общий цикл живого обогащения (см. TestLiveEnrichAllFiles).

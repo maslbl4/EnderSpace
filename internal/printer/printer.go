@@ -14,6 +14,10 @@ import (
 // состояние устройства. Реализации: creality.Client (реальный F005),
 // emulator.Emulator (отладка, без сети).
 type Printer interface {
+	// DriverName — устойчивое имя драйвера ("creality", "nebulaos",
+	// "emulator"); слой приложения помнит его в конфиге, чтобы при
+	// следующем подключении не опрашивать обе ОС.
+	DriverName() string
 	// Info — модель и MAC принтера.
 	Info(ctx context.Context) (Info, error)
 	// ListFiles — список G-кодов из памяти принтера (до обогащения).

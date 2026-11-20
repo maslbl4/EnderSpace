@@ -80,9 +80,26 @@ func NewApp(cfgDir string) *App {
 
 // NewAppWithSink — то же, но события обогащения уходят в sink
 // (в main — Wails-рантайм). Драйвер (стоковая прошивка Creality или
-// NebulaOS/Moonraker) определяется автоматически при подключении.
+// NebulaOS/Moonraker) определяется автоматически при подключении;
+// которым IP подключился, запоминается в конфиге.
 func NewAppWithSink(cfgDir string, sink EventSink) *App {
-	return NewAppWithClientAndSink(cfgDir, detectDriver, sink)
+	a := NewAppWithClientAndSink(cfgDir, nil, sink)
+	a.clientFactory = a.defaultPrinterFactory
+	return a
+}
+
+// defaultPrinterFactory — фабрика принтера по умолчанию: авто-детект ОС
+// (detect.go). Если этот IP уже подключался известным драйвером (из
+// конфига), он зондится первым — повторное подключение не опрашивает
+// вторую ОС.
+func (a *App) defaultPrinterFactory(ip string) printer.Printer {
+	preferred := ""
+	a.mu.Lock()
+	if a.cfg.LastIP == ip {
+		preferred = a.cfg.LastDriver
+	}
+	a.mu.Unlock()
+	return detectDriver(ip, preferred)
 }
 
 // NewAppWithClient — то же, но фабрика принтера задаётся снаружи (тесты).
@@ -124,12 +141,15 @@ func (a *App) Connect(ctx context.Context, ip string) error {
 	a.status = printer.DeviceStatus{}
 	watchCtx, cancel := context.WithCancel(context.Background())
 	a.stateCancel = cancel
+	// Запоминаем, как подключаться: IP + драйвер, которым зашёл, — в
+	// следующий раз он зондится первым (defaultPrinterFactory).
+	a.cfg.LastIP = ip
+	a.cfg.LastDriver = client.DriverName()
 	a.mu.Unlock()
 
 	go a.watchLoop(watchCtx, client)
 
-	// Запоминаем IP последнего принтера (ошибка записи не критична).
-	a.cfg.LastIP = ip
+	// Ошибка записи конфига не критична.
 	_ = a.cfg.Save(a.cfgDir)
 	return nil
 }

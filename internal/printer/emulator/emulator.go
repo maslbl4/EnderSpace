@@ -113,6 +113,9 @@ func New(opts ...Option) *Emulator {
 	return e
 }
 
+// DriverName — имя драйвера в конфиге (lastDriver).
+func (e *Emulator) DriverName() string { return "emulator" }
+
 // Info — модель и MAC.
 func (e *Emulator) Info(ctx context.Context) (printer.Info, error) {
 	return printer.Info{MAC: "EMU000000001", Model: e.model}, nil

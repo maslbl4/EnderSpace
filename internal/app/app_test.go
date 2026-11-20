@@ -32,6 +32,8 @@ type mockPrinter struct {
 	statePush   chan printer.DeviceStatus // нормализованные статусы; WatchStatus пушит в наблюдателя
 }
 
+func (m *mockPrinter) DriverName() string { return "mock" }
+
 func (m *mockPrinter) Info(ctx context.Context) (printer.Info, error) {
 	if !m.infoOK {
 		return printer.Info{}, errors.New("mock: принтер не отвечает")
@@ -587,6 +589,9 @@ func TestConnectPersistsIP(t *testing.T) {
 	if cfg.LastIP != "192.168.3.166" {
 		t.Errorf("config.LastIP = %q, want 192.168.3.166", cfg.LastIP)
 	}
+	if cfg.LastDriver != "mock" {
+		t.Errorf("config.LastDriver = %q, want mock (драйвер, которым подключились)", cfg.LastDriver)
+	}
 	st := app.Status()
 	if !st.Connected || st.IP != "192.168.3.166" {
 		t.Errorf("Status() = %+v, want Connected, IP=192.168.3.166", st)
@@ -703,6 +708,8 @@ type countingDownloader struct {
 	n      *int // DownloadGcode; nil — не считаем
 	nThumb *int // DownloadThumbnail; nil — не считаем
 }
+
+func (c *countingDownloader) DriverName() string { return c.m.DriverName() }
 
 func (c *countingDownloader) Info(ctx context.Context) (printer.Info, error) {
 	return c.m.Info(ctx)
