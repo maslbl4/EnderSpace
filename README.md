@@ -20,9 +20,15 @@ storage of a Creality Ender-3 V3 KE printer:
 - Batch file deletion with a confirmation dialog and a partial-failure report
 - Russian / English interface (toggle in the header, choice is remembered)
 
-The app talks to the printer's own HTTP :80 + WebSocket :9999 protocol
-(documented in [`docs/api-contract.md`](docs/api-contract.md)) — no Moonraker,
-no extra servers, a single self-contained Windows binary.
+The app supports both operating systems of the Ender-3 V3 KE and picks the
+right driver automatically on connect:
+
+- **Creality OS** (stock firmware) — the printer's own HTTP :80 + WebSocket :9999
+  protocol, documented in [`docs/api-contract.md`](docs/api-contract.md);
+- **NebulaOS** (Klipper + Moonraker) — standard Moonraker REST + WebSocket JSON-RPC
+  on port 7125.
+
+No extra servers, a single self-contained Windows binary.
 
 Building, debugging and configuration docs are below (in Russian).
 
@@ -39,7 +45,7 @@ Building, debugging and configuration docs are below (in Russian).
 | Последнее подключение | Запоминается в конфиге | Нет |
 | Зависимости | Go + WebView2 (есть в Win 11) | — |
 
-**Протокол принтера задокументирован**: см. [`docs/api-contract.md`](docs/api-contract.md) (HTTP :80 + WebSocket :9999, не Moonraker).
+**Работает с двумя ОС принтера**: Creality OS (стоковая прошивка, HTTP :80 + WS :9999 — протокол задокументирован в [`docs/api-contract.md`](docs/api-contract.md)) и NebulaOS (Klipper + Moonraker, порт 7125). Драйвер определяется автоматически при подключении.
 
 ---
 
@@ -47,6 +53,7 @@ Building, debugging and configuration docs are below (in Russian).
 
 **Подключение**
 - Ручной IP (запоминается в `config.json`)
+- Creality OS (стоковая прошивка) и NebulaOS (Klipper + Moonraker) — драйвер выбирается автоматически
 
 **Память**
 - Занято / свободно / всего для 8 GB eMMC (оценка «≈» — память общая с прошивкой)
@@ -147,14 +154,16 @@ wails3 dev
 go run ./tools/probe 192.168.3.166 [имя-файла.gcode]
 ```
 
-Проходит все точки контракта: `/info`, WS-список файлов, скачивание G-кода, превью. Полное описание — в [`docs/api-contract.md`](docs/api-contract.md).
+Проходит все точки контракта Creality OS: `/info`, WS-список файлов, скачивание G-кода, превью. Полное описание — в [`docs/api-contract.md`](docs/api-contract.md).
 
 **Сетевые требования**
 
 | Канал | Где | Для чего |
 |---|---|---|
-| HTTP :80 | принтер | `/info`, скачивание G-кодов и превью |
-| WebSocket :9999 | принтер | список файлов, состояние, удаление |
+| HTTP :80 | принтер (Creality OS) | `/info`, скачивание G-кодов и превью |
+| WebSocket :9999 | принтер (Creality OS) | список файлов, состояние, удаление |
+| HTTP :7125 | принтер (NebulaOS) | `/server/info`, файлы, превью, версия ОС |
+| WebSocket :7125 | принтер (NebulaOS) | состояние (`print_stats`), удаление (JSON-RPC) |
 
 ---
 
@@ -177,7 +186,7 @@ go run ./tools/probe 192.168.3.166 [имя-файла.gcode]
 ```
 main.go                  точка входа Wails: регистрирует *app.App
 internal/app/            сервисный слой (Connect/Storage/ListFiles/DeleteFiles)
-internal/printer/        клиент принтера: HTTP + WS 9999
+internal/printer/        интерфейс Printer + драйверы ОС: Creality (HTTP+WS :9999), NebulaOS (Moonraker :7125)
 internal/gcode/          парсер заголовка G-кода (время печати, граммы)
 internal/config/         config.json
 frontend/                React 18 + TypeScript + Vite
