@@ -528,6 +528,23 @@ func TestDeleteFilesRejectsPrintingFile(t *testing.T) {
 	}
 }
 
+// Версия прошивки (DWIN sw ver из modelVersion) доходит до Status.
+func TestStatusFirmwareVersion(t *testing.T) {
+	m := &mockPrinter{infoOK: true, statePush: make(chan string, 8)}
+	app := newTestApp(t, m)
+	if err := app.Connect(context.Background(), "192.168.3.166"); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(func() { _ = app.Disconnect() })
+
+	const mv = "printer hw ver:;printer sw ver:;DWIN hw ver:F005;DWIN sw ver:V1.1.0.15;"
+	m.statePush <- `{"state":0,"modelVersion":"` + mv + `"}`
+	waitStatus(t, app, func(st printer.PrinterStatus) bool { return st.FirmwareVersion != "" })
+	if st := app.Status(); st.FirmwareVersion != "V1.1.0.15" {
+		t.Errorf("Status().FirmwareVersion = %q, want V1.1.0.15", st.FirmwareVersion)
+	}
+}
+
 // b.gcode принтер «не слышит» (WS-отказ) и файл остаётся в списке:
 // после всех раундов — честный отчёт «deleted 1 of 2».
 func TestDeleteFilesStillPresent(t *testing.T) {

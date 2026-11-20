@@ -206,6 +206,11 @@ func (a *App) Status() printer.PrinterStatus {
 				st.PrintFile, _ = a.state.Str("printFileName")
 			}
 		}
+		// Версия прошивки (DWIN sw ver) — из modelVersion, есть в первом
+		// снимке; отсутствует/пусто → "" (UI не показывает).
+		if mv, ok := a.state.Str("modelVersion"); ok {
+			st.FirmwareVersion = printer.FirmwareVersion(mv)
+		}
 	}
 	return st
 }

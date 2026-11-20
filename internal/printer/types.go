@@ -47,11 +47,27 @@ type Storage struct {
 
 // PrinterStatus — текущее состояние подключения.
 type PrinterStatus struct {
-	IP        string
-	Connected bool
-	Printing  bool   // принтер сейчас печатает (если API сообщает)
-	PrintFile string // полный путь печатающегося файла ("" — не печатает)
-	Model     string // код модели, например "F005"
+	IP              string
+	Connected       bool
+	Printing        bool   // принтер сейчас печатает (если API сообщает)
+	PrintFile       string // полный путь печатающегося файла ("" — не печатает)
+	Model           string // код модели, например "F005"
+	FirmwareVersion string // версия прошивки (DWIN sw ver), "" — неизвестна
+}
+
+// FirmwareVersion извлекает версию прошивки из поля modelVersion WS-снимка:
+// пары «ключ:значение», разделённые «;», например
+// "printer hw ver:;printer sw ver:;DWIN hw ver:F005;DWIN sw ver:V1.1.0.15;".
+// Версия ОС/прошивки — «DWIN sw ver»; «DWIN hw ver» дублирует модель,
+// «printer hw/sw ver» у F005 пусты. Нет поля/пусто → "".
+func FirmwareVersion(modelVersion string) string {
+	for _, seg := range strings.Split(modelVersion, ";") {
+		k, v, ok := strings.Cut(seg, ":")
+		if ok && k == "DWIN sw ver" {
+			return v
+		}
+	}
+	return ""
 }
 
 // State — накопленное состояние принтера: первое WS-сообщение — полный

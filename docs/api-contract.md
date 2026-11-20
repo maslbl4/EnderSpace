@@ -98,7 +98,7 @@ Content-Type: application/octet-stream
 Принтер шлёт push каждые ~1–2 с. Первое сообщение — полный снимок состояния
 (~2.4 КБ: `model`, `hostname`, `printProgress`, `printFileName`,
 `printJobTime`, `printLeftTime`, `printStartTime`, `nozzleTemp`, `bedTemp0`,
-`layer`, `TotalLayer`, `state` и др.), далее — компактные дельты
+`layer`, `TotalLayer`, `state`, `modelVersion` и др.), далее — компактные дельты
 (`{"nozzleTemp":"210.43","printJobTime":5368,"curPosition":"X:.. Y:.. Z:.."}`
 и т.п.). Клиент должен мерджить дельты в накопленное состояние.
 
@@ -116,6 +116,16 @@ Content-Type: application/octet-stream
 
 ВНИМАНИЕ: `printFileName` **остаётся с прошлой печати** и в простое —
 метку «печатает» давать только по `state ∈ {1, 5}`.
+
+Поле `modelVersion` — версия прошивки/аппарата, пары «ключ:значение»
+через «;» (живой пример, F005, 2026-11-20):
+
+```
+"printer hw ver:;printer sw ver:;DWIN hw ver:F005;DWIN sw ver:V1.1.0.15;"
+```
+
+`DWIN sw ver` — версия прошивки (ОС); `DWIN hw ver` дублирует модель;
+`printer hw/sw ver` у F005 пусты. В `/info` версий нет.
 
 ## Хранение (eMMC)
 
