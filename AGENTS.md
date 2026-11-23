@@ -62,5 +62,9 @@ NebulaOS: `TestLiveNebulaos` с `ENDERSPACE_LIVE=1` (после прошивки
 
 ## Ограничения окружения
 
-- PowerShell: `curl` = `Invoke-WebRequest` (использовать `curl.exe`)
+- Дефолтный шелл — PowerShell 7 (`pwsh`, `C:\Program Files\PowerShell\7`):
+  Windows Terminal (профиль «PowerShell 7» по умолчанию), VS Code и OpenCode
+  (`shell` в глобальном `opencode.json`). Старые проблемы кавычек PS 5.1
+  для нативных команд больше не актуальны
+- PowerShell (и 5.1, и 7): `curl` = `Invoke-WebRequest` (использовать `curl.exe`)
 - Wails v3 CLI: `go install github.com/wailsapp/wails/v3/cmd/wails3@latest`
